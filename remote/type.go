@@ -59,8 +59,6 @@ import (
 	"time"
 )
 
-// LeakySocket
-
 // LeakySocket is a wrapper for a net.Conn connection that emulates
 // transmission delays and random packet loss. it has its own send
 // and receive functions that together mimic an unreliable connection
@@ -165,8 +163,6 @@ func (ls *LeakySocket) Close() error {
 	return ls.s.Close()
 }
 
-// RemoteError
-
 // RemoteError is a custom error type used for this library to identify remote methods.
 // it is used by both caller and callee endpoints.
 type RemoteError struct {
@@ -199,93 +195,4 @@ type ReplyMsg struct {
 	Success bool
 	Reply   []reflect.Value
 	Err     RemoteError
-}
-
-// CalleeStub -- stub that receives remote calls and hosts an object/instance
-//
-// A CalleeStub encapsulates a multithreaded TCP server that manages a single
-// remote object on a single TCP port, which is a simplification to ease management
-// of remote objects and interaction with callers.  Each CalleeStub is built
-// around a single struct of function declarations. All remote calls are
-// handled synchronously, meaning the lifetime of a connection is that of a
-// sinngle method call.  A CalleeStub can encounter a number of different issues,
-// and most of them will result in sending a failure response to the caller,
-// including a RemoteError with suitable details.
-type CalleeStub struct {
-	// TODO: populate with needed contents including, but not limited to:
-	//       - reflect.Type of the CalleeStub's service interface (struct of Fields)
-	//       - reflect.Value of the CalleeStub's service interface
-	//       - reflect.Value of the CalleeStub's remote object instance
-	//       - status and configuration parameters, as needed
-}
-
-// Callee defines the minimum contract our
-// CalleeStub implementation must satisfy.
-type Callee interface {
-	Start() error      // start a TCP server, then return
-	Stop() error       // close the TCP server, then return
-	IsRunning() bool   // is the TCP server running?
-	GetCallCount() int // how many calls has the TCP server handled (across restarts)?
-}
-
-// build a new CalleeStub instance around a given struct of supported functions,
-// a local instance of a corresponding object that supports these functions,
-// and arguments to support creation and use of LeakySocket-wrapped connections.
-// performs the following:
-// -- returns a local error if function struct or object is nil
-// -- returns a local error if any function in the struct is not a remote function
-// -- if neither error, creates and populates a CalleeStub and returns a pointer
-func NewCalleeStub(sv interface{}, sobj interface{}, address string, lossy bool, delayed bool) (Callee, error) {
-
-	// if ifc is a pointer to a struct with function declarations,
-	// then reflect.TypeOf(ifc).Elem() is the reflected struct's Type
-
-	// if sobj is a pointer to an object instance, then
-	// reflect.ValueOf(sobj) is the reflected object's Value
-
-	// TODO: get the CalleeStub ready to start
-	return nil, nil
-}
-
-// CallerStubCreator -- use reflection to populate the interface functions to create the
-// caller's stub interface. Only works if all functions are exported. Once created,
-// the interface masks remote calls to a CalleeStub that hosts the object instance that
-// the functions are invoked on.  The network address of the remote CalleeStub must be
-// provided with the stub is created, and it may not change later. Arguments include:
-// -- a struct of function declarations to act as the stub's interface
-// -- the remote address of the CalleeStub as "<ip-address>:<port-number>"
-// -- indicator of whether caller-to-callee channel has emulated packet loss
-// -- indicator of whether caller-to-callee channel has emulated propagation delay
-// Performs the following:
-// -- returns a local error if function struct is nil
-// -- returns a local error if any function in the struct is not a remote function
-// -- otherwise, uses reflection to access the functions in the given struct and
-//
-//	populate their function definitions with the required CallerStub functionality
-func CallerStubCreator(ifc interface{}, adr string, lossy bool, delayed bool) error {
-	// if ifc is a pointer to a struct with function declarations,
-	// then reflect.TypeOf(ifc).Elem() is the reflected struct's reflect.Type
-	// and reflect.ValueOf(ifc).Elem() is the reflected struct's reflect.Value
-	//
-	// Here's what it needs to do (not strictly in this order):
-	//
-	//    1. create a request message populated with the method name and input
-	//       arguments to send to the CalleeStub
-	//
-	//    2. create a []reflect.Value of correct size to hold the result to be
-	//       returned back to the program
-	//
-	//    3. connect to the CalleeStub's tcp server, and wrap the connection in an
-	//       appropriate LeakySocket using the parameters given to the CallerStubCreator
-	//
-	//    4. encode the request message into a byte-string to send over the connection
-	//
-	//    5. send the encoded message, noting that the LeakySocket is not guaranteed
-	//       to succeed depending on the given parameters
-	//
-	//    6. wait for a reply to be received using Recv, which is blocking
-	//        -- if Recv returns an error, populate and return error output
-	//
-	//    7. decode the received byte-string according to the expected return types
-	return nil
 }
