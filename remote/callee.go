@@ -79,7 +79,7 @@ func NewCalleeStub(serviceInterface any, serviceObject any, address string, isLo
 			return nil, fmt.Errorf("field %s is not a function", field.Name)
 		}
 		// check if the function has the correct signature
-		if field.Type.NumOut() == 0 || field.Type.Out(1) != reflect.TypeOf((*error)(nil)).Elem() {
+		if field.Type.NumOut() == 0 || field.Type.Out(field.Type.NumOut()-1) != reflect.TypeOf(RemoteError{}) {
 			return nil, fmt.Errorf("function %s does not have the correct signature", field.Name)
 		}
 	}
