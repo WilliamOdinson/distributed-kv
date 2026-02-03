@@ -123,19 +123,21 @@ func (cs *CalleeStub) Start() error {
 
 	// continuously accept new connections
 	// use one goroutine per connection for not blocking
-	for cs.isRunning.Load() {
-		conn, err := listener.Accept()
-		if err != nil && !cs.isRunning.Load() {
-			// server has been stopped, exit the loop
-			return nil
-		}
-		// otherwise, the error might just be end of connection
-		if err != io.EOF {
-			continue
-		}
+	go func() {
+		for cs.isRunning.Load() {
+			conn, err := listener.Accept()
+			if err != nil && !cs.isRunning.Load() {
+				// server has been stopped, exit the loop
+				return
+			}
+			// otherwise, the error might just be end of connection
+			if err != io.EOF {
+				continue
+			}
 
-		go cs.handleConnection(conn)
-	}
+			go cs.handleConnection(conn)
+		}
+	}()
 	return nil
 }
 
