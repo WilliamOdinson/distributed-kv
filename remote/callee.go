@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"reflect"
 	"sync"
 	"sync/atomic"
 )
@@ -23,13 +24,16 @@ type CalleeStub struct {
 	//       - reflect.Value of the CalleeStub's service interface
 	//       - reflect.Value of the CalleeStub's remote object instance
 	//       - status and configuration parameters, as needed
-	address   string       // TCP address to listen on
-	isLossy   bool         // control whether LeakySocket simulates packet loss
-	isDelayed bool         // control whether LeakySocket simulates delayed packets
-	listener  net.Listener // TCP listener
-	isRunning atomic.Bool  // indicator for whether the server is running, supported graceful shutdown
-	callCount int64        // the number of calls handled (across restarts)
-	mu        sync.Mutex   // mutex to protect isRunning and callCount
+	serviceType reflect.Type  // reflected Type of the service interface (struct of Fields)
+	serviceVal  reflect.Value // reflected Value of the service interface
+	objectVal   reflect.Value // reflected Value of the remote object instance
+	address     string        // TCP address to listen on
+	isLossy     bool          // control whether LeakySocket simulates packet loss
+	isDelayed   bool          // control whether LeakySocket simulates delayed packets
+	listener    net.Listener  // TCP listener
+	isRunning   atomic.Bool   // indicator for whether the server is running, supported graceful shutdown
+	callCount   int64         // the number of calls handled (across restarts)
+	mu          sync.Mutex    // mutex to protect isRunning and callCount
 }
 
 // Callee defines the minimum contract our
@@ -48,16 +52,52 @@ type Callee interface {
 // -- returns a local error if function struct or object is nil
 // -- returns a local error if any function in the struct is not a remote function
 // -- if neither error, creates and populates a CalleeStub and returns a pointer
-func NewCalleeStub(sv interface{}, sobj interface{}, address string, lossy bool, delayed bool) (Callee, error) {
+func NewCalleeStub(serviceInterface any, serviceObject any, address string, isLossy bool, isDelayed bool) (Callee, error) {
+	// if function struct or object is nil, return an error
+	if serviceInterface == nil || serviceObject == nil {
+		return nil, fmt.Errorf("serviceInterface or serviceObject is nil")
+	}
 
-	// if ifc is a pointer to a struct with function declarations,
-	// then reflect.TypeOf(ifc).Elem() is the reflected struct's Type
+	// if serviceInterface is not a pointer to a struct or itself is not a struct, return an error
+	serviceType := reflect.TypeOf(serviceInterface)
 
-	// if sobj is a pointer to an object instance, then
-	// reflect.ValueOf(sobj) is the reflected object's Value
+	// dereference pointer types to get to the struct type
+	if serviceType.Kind() == reflect.Pointer {
+		serviceType = serviceType.Elem()
+	}
+	// get the reflect.Value of serviceInterface
+	serviceValue := reflect.ValueOf(serviceInterface)
 
-	// TODO: get the CalleeStub ready to start
-	return nil, nil
+	if serviceType.Kind() != reflect.Struct {
+		return nil, fmt.Errorf("service interface must be a struct or pointer to struct")
+	}
+
+	for i := 0; i < serviceType.NumField(); i++ {
+		field := serviceType.Field(i)
+		// check if the field is a function
+		if field.Type.Kind() != reflect.Func {
+			return nil, fmt.Errorf("field %s is not a function", field.Name)
+		}
+		// check if the function has the correct signature
+		if field.Type.NumOut() == 0 || field.Type.Out(1) != reflect.TypeOf((*error)(nil)).Elem() {
+			return nil, fmt.Errorf("function %s does not have the correct signature", field.Name)
+		}
+	}
+
+	// at this point, we have verified that:
+	// - serviceInterface is a struct or pointer to struct
+	// - all fields in the struct are functions with correct signatures
+
+	// create and populate a CalleeStub instance
+	return &CalleeStub{
+		serviceType: serviceType,
+		serviceVal:  serviceValue,
+		objectVal:   reflect.ValueOf(serviceObject),
+		address:     address,
+		isLossy:     isLossy,
+		isDelayed:   isDelayed,
+		callCount:   0,
+	}, nil
 }
 
 // Start launches the TCP server for Callee.
