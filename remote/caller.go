@@ -1,5 +1,10 @@
 package remote
 
+import (
+	"fmt"
+	"reflect"
+)
+
 // CallerStubCreator -- use reflection to populate the interface functions to create the
 // caller's stub interface. Only works if all functions are exported. Once created,
 // the interface masks remote calls to a CalleeStub that hosts the object instance that
@@ -15,10 +20,10 @@ package remote
 // -- otherwise, uses reflection to access the functions in the given struct and
 //
 //	populate their function definitions with the required CallerStub functionality
-func CallerStubCreator(ifc interface{}, adr string, lossy bool, delayed bool) error {
-	// if ifc is a pointer to a struct with function declarations,
-	// then reflect.TypeOf(ifc).Elem() is the reflected struct's reflect.Type
-	// and reflect.ValueOf(ifc).Elem() is the reflected struct's reflect.Value
+func CallerStubCreator(serviceInterface any, address string, isLossy bool, isDelayed bool) error {
+	// if serviceInterface is a pointer to a struct with function declarations,
+	// then reflect.TypeOf(serviceInterface).Elem() is the reflected struct's reflect.Type
+	// and reflect.ValueOf(serviceInterface).Elem() is the reflected struct's reflect.Value
 	//
 	// Here's what it needs to do (not strictly in this order):
 	//
@@ -40,5 +45,35 @@ func CallerStubCreator(ifc interface{}, adr string, lossy bool, delayed bool) er
 	//        -- if Recv returns an error, populate and return error output
 	//
 	//    7. decode the received byte-string according to the expected return types
+
+	// returns a local error if function struct is nil
+	if serviceInterface == nil {
+		return fmt.Errorf("serviceInterface should not be nil")
+	}
+
+	// returns a local error if any function in the struct is not a remote function
+	serviceType := reflect.TypeOf(serviceInterface)
+
+	// dereference pointer types to get to the struct type
+	if serviceType.Kind() == reflect.Pointer {
+		serviceType = serviceType.Elem()
+	}
+
+	if serviceType.Kind() != reflect.Struct {
+		return fmt.Errorf("service interface must be a struct or pointer to struct")
+	}
+
+	for i := 0; i < serviceType.NumField(); i++ {
+		field := serviceType.Field(i)
+		// check if the field is a function
+		if field.Type.Kind() != reflect.Func {
+			return fmt.Errorf("field %s is not a function", field.Name)
+		}
+		// check if the function has the correct signature
+		if field.Type.NumOut() == 0 || field.Type.Out(field.Type.NumOut()-1) != reflect.TypeOf(RemoteError{}) {
+			return fmt.Errorf("function %s does not have the correct signature", field.Name)
+		}
+	}
+
 	return nil
 }
