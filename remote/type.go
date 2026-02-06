@@ -55,7 +55,6 @@ import (
 	"io"
 	"math/rand"
 	"net"
-	"reflect"
 	"time"
 )
 
@@ -181,7 +180,7 @@ func (e *RemoteError) Error() string {
 // arbitrary argument types across the network.
 type RequestMsg struct {
 	Method string
-	Args   []reflect.Value
+	Args   [][]byte
 }
 
 // ReplyMsg (this is only a suggestion, can be changed)
@@ -193,6 +192,6 @@ type RequestMsg struct {
 // a RemoteError to specify details of any encountered failure.
 type ReplyMsg struct {
 	Success bool
-	Reply   []reflect.Value
+	Reply   [][]byte
 	Err     RemoteError
 }
