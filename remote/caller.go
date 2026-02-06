@@ -93,20 +93,20 @@ func CallerStubCreator(serviceInterface any, address string, isLossy bool, isDel
 			for i, arg := range args {
 				var buf bytes.Buffer
 				if err := gob.NewEncoder(&buf).Encode(arg.Interface()); err != nil {
-					return makeCalleeErrorResponse(funcType, fmt.Sprintf("[Caller] failed to encode argument: %v", err))
+					return makeCallerErrorResponse(funcType, fmt.Sprintf("[Caller] failed to encode argument: %v", err))
 				}
 				reqMsg.Args[i] = buf.Bytes()
 			}
 
 			var reqBuf bytes.Buffer
 			if err := gob.NewEncoder(&reqBuf).Encode(reqMsg); err != nil {
-				return makeCalleeErrorResponse(funcType, fmt.Sprintf("[Caller] failed to encode request message: %v", err))
+				return makeCallerErrorResponse(funcType, fmt.Sprintf("[Caller] failed to encode request message: %v", err))
 			}
 
 			// connect to remote callee
 			conn, err := net.Dial("tcp", address)
 			if err != nil {
-				return makeCalleeErrorResponse(funcType, fmt.Sprintf("[Caller] failed to connect to remote callee: %v", err))
+				return makeCallerErrorResponse(funcType, fmt.Sprintf("[Caller] failed to connect to remote callee: %v", err))
 			}
 			defer conn.Close()
 
@@ -116,23 +116,23 @@ func CallerStubCreator(serviceInterface any, address string, isLossy bool, isDel
 			// encode request message
 			sent, err := leakyConn.Send(reqBuf.Bytes())
 			if err != nil || !sent {
-				return makeCalleeErrorResponse(funcType, fmt.Sprintf("[Caller] failed to send request message: %v", err))
+				return makeCallerErrorResponse(funcType, fmt.Sprintf("[Caller] failed to send request message: %v", err))
 			}
 
 			// wait for reply
 			replyMsg, err := leakyConn.Recv()
 
 			if err != nil {
-				return makeCalleeErrorResponse(funcType, fmt.Sprintf("[Caller] failed to receive reply message: %v", err))
+				return makeCallerErrorResponse(funcType, fmt.Sprintf("[Caller] failed to receive reply message: %v", err))
 			}
 
 			var reply ReplyMsg
 			if err := gob.NewDecoder(bytes.NewReader(replyMsg)).Decode(&reply); err != nil {
-				return makeCalleeErrorResponse(funcType, fmt.Sprintf("[Caller] failed to decode reply message from remote callee: %v", err))
+				return makeCallerErrorResponse(funcType, fmt.Sprintf("[Caller] failed to decode reply message from remote callee: %v", err))
 			}
 
 			if !reply.Success {
-				return makeCalleeErrorResponse(funcType, reply.Err.Err)
+				return makeCallerErrorResponse(funcType, reply.Err.Err)
 			}
 			returnCount := funcType.NumOut()
 			results := make([]reflect.Value, returnCount)
