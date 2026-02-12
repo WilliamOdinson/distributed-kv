@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"reflect"
+	"time"
 )
 
 // CallerStubCreator -- use reflection to populate the interface functions to create the
@@ -103,32 +104,36 @@ func CallerStubCreator(serviceInterface any, address string, isLossy bool, isDel
 				return makeCallerErrorResponse(funcType, fmt.Sprintf("[Caller] failed to encode request message: %v", err))
 			}
 
-			// connect to remote callee
-			conn, err := net.Dial("tcp", address)
-			if err != nil {
-				return makeCallerErrorResponse(funcType, fmt.Sprintf("[Caller] failed to connect to remote callee: %v", err))
-			}
-			defer conn.Close()
-
-			// wrap connection in leaky socket
-			leakyConn := NewLeakySocket(conn, isLossy, isDelayed)
-
-			// encode request message
-			sent, err := leakyConn.Send(reqBuf.Bytes())
-			if err != nil || !sent {
-				return makeCallerErrorResponse(funcType, fmt.Sprintf("[Caller] failed to send request message: %v", err))
-			}
-
-			// wait for reply
-			replyMsg, err := leakyConn.Recv()
-
-			if err != nil {
-				return makeCallerErrorResponse(funcType, fmt.Sprintf("[Caller] failed to receive reply message: %v", err))
-			}
-
+			flag := false
 			var reply ReplyMsg
-			if err := gob.NewDecoder(bytes.NewReader(replyMsg)).Decode(&reply); err != nil {
-				return makeCallerErrorResponse(funcType, fmt.Sprintf("[Caller] failed to decode reply message from remote callee: %v", err))
+
+			for !flag { // connect to remote callee
+				conn, err := net.Dial("tcp", address)
+				if err != nil {
+					return makeCallerErrorResponse(funcType, fmt.Sprintf("[Caller] failed to connect to remote callee: %v", err))
+				}
+				defer conn.Close()
+
+				// wrap connection in leaky socket
+				leakyConn := NewLeakySocket(conn, isLossy, isDelayed)
+
+				// encode request message
+				sent, err := leakyConn.Send(reqBuf.Bytes())
+				if err != nil || !sent {
+					continue // packet lost, should retry
+				}
+
+				// wait for reply
+				conn.SetReadDeadline(time.Now().Add(time.Second))
+				replyMsg, err := leakyConn.Recv()
+
+				if err != nil {
+					continue // packet lost, should retry
+				}
+				if err := gob.NewDecoder(bytes.NewReader(replyMsg)).Decode(&reply); err != nil {
+					return makeCallerErrorResponse(funcType, fmt.Sprintf("[Caller] failed to decode reply message from remote callee: %v", err))
+				}
+				flag = true
 			}
 
 			if !reply.Success {
