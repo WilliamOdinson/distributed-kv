@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/gob"
 	"fmt"
-	"io"
 	"net"
 	"reflect"
 	"sync"
@@ -133,7 +132,7 @@ func (cs *CalleeStub) Start() error {
 				return
 			}
 			// otherwise, the error might just be end of connection
-			if err != io.EOF {
+			if err != nil {
 				continue
 			}
 

@@ -137,7 +137,11 @@ func CallerStubCreator(serviceInterface any, address string, isLossy bool, isDel
 			returnCount := funcType.NumOut()
 			results := make([]reflect.Value, returnCount)
 			for i := 0; i < returnCount-1; i++ {
-				// TODO: decode each return value according to its expected type
+				ptr := reflect.New(funcType.Out(i))
+				if err := gob.NewDecoder(bytes.NewReader(reply.Reply[i])).DecodeValue(ptr); err != nil {
+					return makeCallerErrorResponse(funcType, "[Caller] failed to decode return value: "+err.Error())
+				}
+				results[i] = ptr.Elem()
 			}
 			results[returnCount-1] = reflect.Zero(reflect.TypeOf(RemoteError{}))
 			return results
