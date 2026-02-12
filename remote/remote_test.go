@@ -212,3 +212,408 @@ func TestCheckpoint_CalleeStubRuns(t *testing.T) {
 // TestFinal_CallerStubInterface -- perform basic tests on CallerStub creation
 // -- verifies that CallerStubCreator rejects non-remote interfaces and nulls
 // -- verifies that CallerStubCreator accepts remote interfaces
+func TestFinal_CallerStubInterface(t *testing.T) {
+
+	// choose a large-ish random port number for each test
+	addr := "localhost:" + strconv.Itoa(rand.Intn(10000)+20000)
+
+	// should throw an error due to non-remote interface definition and instance
+	err := CallerStubCreator(&InvalidInterface{}, addr, false, false)
+	if err == nil {
+		t.Fatalf("CallerStubCreator accepted non-remote service interface")
+	}
+
+	// should throw an error due to nil interface
+	err = CallerStubCreator(nil, addr, false, false)
+	if err == nil {
+		t.Fatalf("CallerStubCreator accepted nil service interface")
+	}
+
+	// should work correctly with no error
+	caller := &RemoteTestInterface{}
+	err = CallerStubCreator(caller, addr, false, false)
+	if err != nil {
+		t.Fatalf("CallerStubCreator failed to create CallerStub from interface")
+	}
+}
+
+// TestFinal_CallerStubConnects -- perform basic tests on CallerStub use, namely
+// verifies that a CallerStub can actually connect to a CalleeStub at the given address.
+func TestFinal_CallerStubConnects(t *testing.T) {
+
+	// choose a large-ish random port number for each test
+	addr := "localhost:" + strconv.Itoa(rand.Intn(10000)+20000)
+
+	// create the CalleeStub, should work if the previous test passed
+	callee, err := NewCalleeStub(&RemoteTestInterface{}, &RemoteTestInstance{}, addr, false, false)
+	if err != nil {
+		t.Fatalf("Error in NewCalleeStub: %s", err.Error())
+	}
+	if callee == nil {
+		t.Fatalf("NewCalleeStub returned nil")
+	}
+
+	err = callee.Start()
+	if err != nil {
+		t.Fatalf("Error in CalleeStub Start(): %s", err.Error())
+	}
+	defer callee.Stop()
+
+	// wait for CalleeStub to start...or timeout
+	ddln := time.Now().Add(5 * time.Second)
+	for !callee.IsRunning() && time.Now().Before(ddln) {
+	}
+	if !callee.IsRunning() {
+		t.Fatalf("Timeout waiting for CalleeStub to start")
+	}
+
+	// create the CallerStub, should work if previous test passed
+	caller := &RemoteTestInterface{}
+	err = CallerStubCreator(caller, addr, false, false)
+	if err != nil {
+		t.Fatalf("CallerStubCreator failed to create CallerStub from interface")
+	}
+
+	caller.RemoteTestMethod(1, false)
+}
+
+// TestFinal_Connection -- tests complete connection between CallerStub and CalleeStub,
+// including passing arguments, return values, and remote exceptions.
+func TestFinal_Connection(t *testing.T) {
+
+	// choose a large-ish random port number for each test
+	addr := "localhost:" + strconv.Itoa(rand.Intn(10000)+20000)
+
+	// create the CalleeStub, should work if the previous test passed
+	callee, err := NewCalleeStub(&RemoteTestInterface{}, &RemoteTestInstance{}, addr, false, false)
+	if err != nil {
+		t.Fatalf("Error in NewCalleeStub: %s", err.Error())
+	}
+	if callee == nil {
+		t.Fatalf("NewCalleeStub returned nil")
+	}
+
+	err = callee.Start()
+	if err != nil {
+		t.Fatalf("Error in CalleeStub Start(): %s", err.Error())
+	}
+	defer callee.Stop()
+
+	// wait for CalleeStub to start...or timeout
+	ddln := time.Now().Add(5 * time.Second)
+	for !callee.IsRunning() && time.Now().Before(ddln) {
+	}
+	if !callee.IsRunning() {
+		t.Fatalf("Timeout waiting for CalleeStub to start")
+	}
+
+	// create the CallerStub, should work if previous test passed
+	caller := &RemoteTestInterface{}
+	err = CallerStubCreator(caller, addr, false, false)
+	if err != nil {
+		t.Fatalf("CallerStubCreator failed to create CallerStub from interface")
+	}
+
+	// Attempt to get a value from the CalleeStub.
+	i, e, r := caller.RemoteTestMethod(1, false)
+	if i != 1 || e != "" || r.Error() != "" {
+		t.Fatalf("CalleeStub returned an incorrect result for argument false")
+	}
+
+	// Attempt to get an error message.
+	i, e, r = caller.RemoteTestMethod(1, true)
+	if i != -1 || e == "" || r.Error() != "" {
+		t.Fatalf("CalleeStub returned an incorrect result for argument true")
+	}
+
+	// Attempt to call a much more complex function.
+	d := make(map[string][]string)
+	d["apple"] = []string{"a delicious fruit", "a company that doesn't make delicious fruit"}
+	d["gold"] = []string{"a precious metal", "the color of the precious metal with the same name"}
+	ct, re := caller.ComplexTestMethod(d)
+	if re.Error() != "" || ct == nil || len(ct) != 2 || (!(ct[0] == 60 && ct[1] == 66) && !(ct[1] == 60 && ct[0] == 66)) {
+		t.Fatalf("CalleeStub did not correctly handle a more complex call")
+	}
+}
+
+// TestFinal_LossyConnection -- tests connection between CallerStub and CalleeStub,
+// when the connection is not reliable, including large number of remote calls.
+func TestFinal_LossyConnection(t *testing.T) {
+
+	// choose a large-ish random port number for each test
+	addr := "localhost:" + strconv.Itoa(rand.Intn(10000)+20000)
+
+	// create the CalleeStub, should work if the previous test passed
+	callee, err := NewCalleeStub(&RemoteTestInterface{}, &RemoteTestInstance{}, addr, true, true)
+	if err != nil {
+		t.Fatalf("Error in NewCalleeStub: %s", err.Error())
+	}
+	if callee == nil {
+		t.Fatalf("NewCalleeStub returned nil")
+	}
+
+	err = callee.Start()
+	if err != nil {
+		t.Fatalf("Error in CalleeStub Start(): %s", err.Error())
+	}
+	defer callee.Stop()
+
+	// wait for CalleeStub to start...or timeout
+	ddln := time.Now().Add(5 * time.Second)
+	for !callee.IsRunning() && time.Now().Before(ddln) {
+	}
+	if !callee.IsRunning() {
+		t.Fatalf("Timeout waiting for CalleeStub to start")
+	}
+
+	// create the CallerStub, should work if previous test passed
+	caller := &RemoteTestInterface{}
+	err = CallerStubCreator(caller, addr, true, true)
+	if err != nil {
+		t.Fatalf("CallerStubCreator failed to create CallerStub from interface")
+	}
+
+	// Attempt to get a whole lot of values from the CalleeStub.
+	var i int
+	var e string
+	var r RemoteError
+
+	for j := 0; j < 100; j++ {
+		i, e, r = caller.RemoteTestMethod(j, false)
+		if i != j || e != "" || r.Error() != "" {
+			t.Fatalf("CalleeStub returned an incorrect result for argument false")
+		}
+	}
+}
+
+// TestFinal_Reconnection -- tests connection and use, disconnection,
+// reconnection and use, another disconnection, another reconnection and use.
+func TestFinal_Reconnection(t *testing.T) {
+
+	// choose a large-ish random port number for each test
+	addr := "localhost:" + strconv.Itoa(rand.Intn(10000)+20000)
+
+	// create the CalleeStub, should work if the previous tests passed
+	callee, err := NewCalleeStub(&RemoteTestInterface{}, &RemoteTestInstance{}, addr, false, false)
+	if err != nil {
+		t.Fatalf("Error in NewCalleeStub: %s", err.Error())
+	}
+	if callee == nil {
+		t.Fatalf("NewCalleeStub returned nil")
+	}
+
+	// create the CallerStub, should work if previous tests passed
+	caller := &RemoteTestInterface{}
+	err = CallerStubCreator(caller, addr, false, false)
+	if err != nil {
+		t.Fatalf("CallerStubCreator failed to create CallerStub from interface")
+	}
+
+	err = callee.Start()
+	if err != nil {
+		t.Fatalf("Error in CalleeStub Start(): %s", err.Error())
+	}
+
+	// wait for CalleeStub to start...or timeout
+	ddln := time.Now().Add(time.Second)
+	for !callee.IsRunning() && time.Now().Before(ddln) {
+	}
+	if !callee.IsRunning() {
+		t.Fatalf("Timeout waiting for CalleeStub to start")
+	}
+
+	// Attempt to get a value from the stub.
+	i, e, r := caller.RemoteTestMethod(1, false)
+	if i != 1 || e != "" || r.Error() != "" {
+		t.Fatalf("CalleeStub returned an incorrect result for argument false")
+	}
+
+	callee.Stop()
+
+	// make a call that should fail because the CalleeStub stopped.
+	i, e, r = caller.RemoteTestMethod(1, false)
+	if r.Error() == "" {
+		t.Fatalf("Call to stopped CalleeStub didn't return an error")
+	}
+
+	time.Sleep(time.Second) // take a little nap then restart CalleeStub
+	err = callee.Start()
+	if err != nil {
+		t.Fatalf("Error in CalleeStub Start() 2nd time: %s", err.Error())
+	}
+
+	// wait for CalleeStub to start...or timeout
+	ddln = time.Now().Add(time.Second)
+	for !callee.IsRunning() && time.Now().Before(ddln) {
+	}
+	if !callee.IsRunning() {
+		t.Fatalf("Timeout waiting for CalleeStub to start 2nd time")
+	}
+
+	// Attempt to get a value from the stub.
+	i, e, r = caller.RemoteTestMethod(1, false)
+	if i != 1 || e != "" || r.Error() != "" {
+		t.Fatalf("CalleeStub returned an incorrect result for argument false")
+	}
+
+	callee.Stop()
+
+	// make a call that should fail because the CalleeStub stopped.
+	i, e, r = caller.RemoteTestMethod(1, false)
+	if r.Error() == "" {
+		t.Fatalf("Call to stopped CalleeStub didn't return an error")
+	}
+
+	time.Sleep(time.Second) // take a little nap then restart CalleeStub
+	err = callee.Start()
+	if err != nil {
+		t.Fatalf("Error in CalleeStub Start() 3rd time: %s", err.Error())
+	}
+
+	// wait for CalleeStub to start...or timeout
+	ddln = time.Now().Add(time.Second)
+	for !callee.IsRunning() && time.Now().Before(ddln) {
+	}
+	if !callee.IsRunning() {
+		t.Fatalf("Timeout waiting for CalleeStub to start 3rd time")
+	}
+
+	// Attempt to get a value from the stub.
+	i, e, r = caller.RemoteTestMethod(1, false)
+	if i != 1 || e != "" || r.Error() != "" {
+		t.Fatalf("CalleeStub returned an incorrect result for argument false")
+	}
+
+	callee.Stop()
+}
+
+// TestFinal_Multithread -- checks that the CalleeStub supports multiple simultaneous
+// connections, using the PairUp method in the RemoteTestInterface.
+func TestFinal_Multithread(t *testing.T) {
+
+	// choose a large-ish random port number for each test
+	addr := "localhost:" + strconv.Itoa(rand.Intn(10000)+20000)
+
+	// create the CalleeStub, should work if the previous tests pass
+	callee, err := NewCalleeStub(&RemoteTestInterface{}, &RemoteTestInstance{}, addr, false, false)
+	if err != nil {
+		t.Fatalf("Error in NewCalleeStub: %s", err.Error())
+	}
+	if callee == nil {
+		t.Fatalf("NewCalleeStub returned nil")
+	}
+
+	err = callee.Start()
+	if err != nil {
+		t.Fatalf("Error in CalleeStub Start(): %s", err.Error())
+	}
+	defer callee.Stop()
+
+	// wait for CalleeStub to start...or timeout
+	ddln := time.Now().Add(5 * time.Second)
+	for !callee.IsRunning() && time.Now().Before(ddln) {
+	}
+	if !callee.IsRunning() {
+		t.Fatalf("Timeout waiting for CalleeStub to start")
+	}
+
+	// create the CallerStub, should work if previous tests pass
+	caller := &RemoteTestInterface{}
+	err = CallerStubCreator(caller, addr, false, false)
+	if err != nil {
+		t.Fatalf("CallerStubCreator failed to create CallerStub from interface")
+	}
+
+	// create a second thread that calls PairUp on the test object.
+	go func() {
+		// call the PairUp method
+		r := caller.PairUp()
+		if r.Error() != "" {
+			t.Fatalf("PairUp call in go routine failed: %s", r.Error())
+		}
+	}()
+
+	r := caller.PairUp()
+	if r.Error() != "" {
+		t.Fatalf("PairUp call failed: %s", r.Error())
+	}
+}
+
+// TestFinal_MismatchedInterface -- checks that the CalleeStub handles incorrect method signatures,
+// including extra methods, different argument number and types, and different return type
+func TestFinal_MismatchedInterface(t *testing.T) {
+
+	// choose a large-ish random port number for each test
+	addr := "localhost:" + strconv.Itoa(rand.Intn(10000)+20000)
+
+	// create the CalleeStub, should work if the previous tests pass
+	callee, err := NewCalleeStub(&RemoteTestInterface{}, &RemoteTestInstance{}, addr, false, false)
+	if err != nil {
+		t.Fatalf("Error in NewCalleeStub: %s", err.Error())
+	}
+	if callee == nil {
+		t.Fatalf("NewCalleeStub returned nil")
+	}
+
+	err = callee.Start()
+	if err != nil {
+		t.Fatalf("Error in CalleeStub Start(): %s", err.Error())
+	}
+	defer callee.Stop()
+
+	// wait for CalleeStub to start...or timeout
+	ddln := time.Now().Add(5 * time.Second)
+	for !callee.IsRunning() && time.Now().Before(ddln) {
+	}
+	if !callee.IsRunning() {
+		t.Fatalf("Timeout waiting for CalleeStub to start")
+	}
+
+	// create the stub, should work if previous tests pass
+	caller := &MismatchInterface{}
+	err = CallerStubCreator(caller, addr, false, false)
+	if err != nil {
+		t.Fatalf("CallerStubCreator failed to create CalleeStub from MismatchInterface")
+	}
+
+	var r RemoteError
+
+	// invoke a method not in the RemoteTestInterface.
+	r = caller.ExtraMethod()
+	if r.Error() == "" {
+		t.Fatalf("CalleeStub accepted undefined method from CallerStub")
+	}
+
+	// invoke a method with different argument types from RemoteTestInterface.
+	_, _, r = caller.RemoteTestMethod(1, 1)
+	if r.Error() == "" {
+		t.Fatalf("CalleeStub accepted incorrect argument type from CallerStub")
+	}
+
+	// second thread calls PairUp expecting two return values.
+	go func() {
+		// call the PairUp method
+		_, r := caller.PairUp()
+		if r.Error() == "" {
+			t.Fatalf("Second thread accepted reply with wrong return arguments")
+		}
+	}()
+
+	_, r = caller.PairUp()
+	if r.Error() == "" {
+		t.Fatalf("CallerStub accepted reply with wrong return arguments")
+	}
+
+	// create another CallerStub, should work if previous tests pass
+	caller2 := &MismatchInterface2{}
+	err = CallerStubCreator(caller2, addr, false, false)
+	if err != nil {
+		t.Fatalf("CallerStubCreator failed to create CalleeStub from MismatchInterface2")
+	}
+
+	// invoke a method with more arguments than RemoteTestInterface.
+	_, _, r = caller2.RemoteTestMethod(1, true, 1)
+	if r.Error() == "" {
+		t.Fatalf("CalleeStub accepted incorrect argument count from CallerStub")
+	}
+}
