@@ -163,15 +163,15 @@ func (cs *CalleeStub) handleConnection(conn net.Conn) {
 	}
 
 	// find the corresponding function in the service interface
-	method, ok := cs.serviceType.MethodByName(req.Method)
-	if !ok {
+	methodVal := cs.objectVal.MethodByName(req.Method)
+	if !methodVal.IsValid() {
 		// if method is not found, send an error message back to the caller
 		cs.SendErrorMessage(conn, "[Callee] method not found: "+req.Method)
 		return
 	}
 
 	// check if the method has the correct signature
-	methodType := method.Type
+	methodType := methodVal.Type()
 	if methodType.NumIn() != len(req.Args) {
 		cs.SendErrorMessage(conn, fmt.Sprintf("[Callee] argument count mismatch for method %s: expected %d, got %d", req.Method, methodType.NumIn(), len(req.Args)))
 		return
@@ -191,7 +191,6 @@ func (cs *CalleeStub) handleConnection(conn net.Conn) {
 	}
 
 	// call the method on the service object
-	methodVal := cs.objectVal.MethodByName(req.Method)
 	results := methodVal.Call(args)
 
 	// prepare the reply message
