@@ -26,21 +26,26 @@ type TicketBoxInterface struct {
 
 // Configuration constants for remote service connection, shared between client and server.
 const (
-	defaultAddress = "localhost:14736"
-	isLossy        = true
-	isDelayed      = true
+	defaultAddress1 = "localhost:14736"
+	defaultAddress2 = "localhost:14737"
+	isLossy         = true
+	isDelayed       = true
 )
 
 func main() {
-	address := defaultAddress
+	address1 := defaultAddress1
+	address2 := defaultAddress2
 	if len(os.Args) > 1 {
-		address = os.Args[1]
+		address1 = os.Args[1]
 	}
-	log.Printf("Connecting to TicketBox server at %s\n", address)
+	if len(os.Args) > 2 {
+		address2 = os.Args[2]
+	}
 
+	log.Printf("Starting TicketBox client connecting to %s", address1)
 	// create a client stub for the TicketBoxInterface using the remote package's CallerStubCreator.
-	client := &TicketBoxInterface{}
-	if err := remote.CallerStubCreator(client, address, isLossy, isDelayed); err != nil {
+	client1 := &TicketBoxInterface{}
+	if err := remote.CallerStubCreator(client1, address1, isLossy, isDelayed); err != nil {
 		log.Printf("Failed to register client: %v\n", err)
 		return
 	}
@@ -53,10 +58,20 @@ func main() {
 		wg.Add(1)
 		go func(u string) {
 			defer wg.Done()
-			TestClient(u, client)
+			TestClient(u, client1)
 		}(user)
 	}
 	wg.Wait()
+	TestClient("David", client1) // deterministically buy the last ticket for event "14736" on client1
+
+	// create another client stub to test the independent state of the second server instance.
+	log.Printf("Starting TicketBox client connecting to %s", address2)
+	client2 := &TicketBoxInterface{}
+	if err := remote.CallerStubCreator(client2, address2, isLossy, isDelayed); err != nil {
+		log.Printf("Failed to register client: %v\n", err)
+		return
+	}
+	TestClient("William", client2) // William should be able to buy the ticket for event "14736" on client2 even client1 has sold out the ticket
 }
 
 // TestClient performs a series of operations using the TicketBoxInterface client for a given user.

@@ -27,9 +27,10 @@ type TicketBoxInterface struct {
 
 // Configuration constants for remote service connection, shared between client and server.
 const (
-	defaultAddress = "localhost:14736"
-	isLossy        = true
-	isDelayed      = true
+	defaultAddress1 = "localhost:14736"
+	defaultAddress2 = "localhost:14737"
+	isLossy         = true
+	isDelayed       = true
 )
 
 // TicketBoxService is the implementation of the TicketBoxInterface. It implements all the methods defined in the interface for clients to invoke remotely.
@@ -114,15 +115,18 @@ func (s *TicketBoxService) RefundTicket(user string, event string) (string, erro
 }
 
 func main() {
-	address := defaultAddress
-	// accept service address as a command-line argument; default to localhost:14736
+	address1 := defaultAddress1
 	if len(os.Args) > 1 {
-		address = os.Args[1]
+		address1 = os.Args[1]
 	}
-	log.Printf("Starting TicketBox server on %s\n", address)
 
-	server := &TicketBoxInterface{}
-	service := &TicketBoxService{
+	address2 := defaultAddress2
+	if len(os.Args) > 2 {
+		address2 = os.Args[2]
+	}
+
+	// Instance 1
+	service1 := &TicketBoxService{
 		events: map[string]int{
 			"14736": 1, // only 1 ticket for this event to test the sold out case
 			"15513": 10,
@@ -130,15 +134,28 @@ func main() {
 		},
 		tickets: make(map[string][]string),
 	}
-
-	// create a new CalleeStub with our DIY library and start the server
-	callee, err := remote.NewCalleeStub(server, service, address, isLossy, isDelayed)
+	callee1, err := remote.NewCalleeStub(&TicketBoxInterface{}, service1, address1, isLossy, isDelayed)
 	if err != nil {
-		log.Printf("Failed to register server: %v\n", err)
-		return
+		log.Fatalf("Failed to start instance 1: %v\n", err)
 	}
+	callee1.Start()
+	log.Printf("Instance 1 running on %s\n", address1)
 
-	callee.Start()
+	// Instance 2
+	service2 := &TicketBoxService{
+		events: map[string]int{
+			"14736": 1, // only 1 ticket for this event to test the sold out case
+			"15513": 10,
+			"15619": 10,
+		},
+		tickets: make(map[string][]string),
+	}
+	callee2, err := remote.NewCalleeStub(&TicketBoxInterface{}, service2, address2, isLossy, isDelayed)
+	if err != nil {
+		log.Fatalf("Failed to start instance 2: %v\n", err)
+	}
+	callee2.Start()
+	log.Printf("Instance 2 running on %s\n", address2)
 
 	// block forever to keep the server running
 	select {}
