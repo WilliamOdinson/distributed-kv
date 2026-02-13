@@ -10,40 +10,31 @@ import (
 	"sync/atomic"
 )
 
-// CalleeStub -- stub that receives remote calls and hosts an object/instance
-// A CalleeStub encapsulates a multithreaded TCP server that manages a single
-// remote object on a single TCP port, which is a simplification to ease management
-// of remote objects and interaction with callers.  Each CalleeStub is built
-// around a single struct of function declarations. All remote calls are
-// handled synchronously, meaning the lifetime of a connection is that of a
-// single method call.  A CalleeStub can encounter a number of different issues,
-// and most of them will result in sending a failure response to the caller,
-// including a RemoteError with suitable details.
+// CalleeStub is a struct that implements the Callee interface and serves as a TCP server to handle remote procedure calls.
 type CalleeStub struct {
 	// TODO: populate with needed contents including, but not limited to:
 	//       - reflect.Type of the CalleeStub's service interface (struct of Fields)
 	//       - reflect.Value of the CalleeStub's service interface
 	//       - reflect.Value of the CalleeStub's remote object instance
 	//       - status and configuration parameters, as needed
-	serviceType reflect.Type  // reflected Type of the service interface (struct of Fields)
-	serviceVal  reflect.Value // reflected Value of the service interface
-	objectVal   reflect.Value // reflected Value of the remote object instance
-	address     string        // TCP address to listen on
-	isLossy     bool          // control whether LeakySocket simulates packet loss
-	isDelayed   bool          // control whether LeakySocket simulates delayed packets
-	listener    net.Listener  // TCP listener
-	isRunning   atomic.Bool   // indicator for whether the server is running, supported graceful shutdown
-	callCount   int64         // the number of calls handled (across restarts)
+	serviceType reflect.Type  // type descriptor of the service interface struct
+	serviceVal  reflect.Value // reflected value of the service interface struct
+	objectVal   reflect.Value // reflected value of the concrete service object
+	address     string        // TCP address to listen on (e.g., "localhost:8080")
+	isLossy     bool          // whether LeakySocket simulates packet loss
+	isDelayed   bool          // whether LeakySocket simulates delayed packets
+	listener    net.Listener  // TCP listener, used to accept incoming connections
+	isRunning   atomic.Bool   // indicator for whether the server is running for graceful shutdown
+	callCount   int64         // total number of successful calls (across restarts)
 	mu          sync.Mutex    // mutex to protect isRunning and callCount
 }
 
-// Callee defines the minimum contract our
-// CalleeStub implementation must satisfy.
+// Callee defines the interface that any CalleeStub implementation must satisfy.
 type Callee interface {
-	Start() error      // start a TCP server, then return
-	Stop() error       // close the TCP server, then return
-	IsRunning() bool   // is the TCP server running?
-	GetCallCount() int // how many calls has the TCP server handled (across restarts)?
+	Start() error      // non-blocking start a TCP server (returns immediately)
+	Stop() error       // graceful shutdown of the TCP server
+	IsRunning() bool   // report whether the server is currently accepting connections
+	GetCallCount() int // return the total number of calls handled across all restarts
 }
 
 // build a new CalleeStub instance around a given struct of supported functions,
@@ -53,33 +44,41 @@ type Callee interface {
 // -- returns a local error if function struct or object is nil
 // -- returns a local error if any function in the struct is not a remote function
 // -- if neither error, creates and populates a CalleeStub and returns a pointer
+
+// NewCalleeStub validates the provided service interface and object, then creates and returns a new CalleeStub instance configured with the given parameters.
+//
+// It checks the following conditions:
+// 1. serviceInterface or serviceObject should not be nil
+// 2. serviceInterface should be a struct or pointer to struct
+// 3. each field of the serviceInterface should be a function with the correct signature: last return value must be RemoteError
 func NewCalleeStub(serviceInterface any, serviceObject any, address string, isLossy bool, isDelayed bool) (Callee, error) {
-	// if function struct or object is nil, return an error
+	// Check 1. if function struct or object is nil, return an error
 	if serviceInterface == nil || serviceObject == nil {
 		return nil, fmt.Errorf("serviceInterface or serviceObject is nil")
 	}
 
-	// if serviceInterface is not a pointer to a struct or itself is not a struct, return an error
+	// Check 2. if serviceInterface is not a pointer to a struct or itself is not a struct, return an error
 	serviceType := reflect.TypeOf(serviceInterface)
 
-	// dereference pointer types to get to the struct type
+	// dereference if serviceInterface is a pointer
 	if serviceType.Kind() == reflect.Pointer {
 		serviceType = serviceType.Elem()
 	}
-	// get the reflect.Value of serviceInterface
 	serviceValue := reflect.ValueOf(serviceInterface)
 
+	// if serviceType is not a struct, return an error
 	if serviceType.Kind() != reflect.Struct {
 		return nil, fmt.Errorf("service interface must be a struct or pointer to struct")
 	}
 
+	// Check 3. for each field in the struct, if it is not a function or does not have the correct signature, return an error
 	for i := 0; i < serviceType.NumField(); i++ {
 		field := serviceType.Field(i)
-		// check if the field is a function
+		// use Type.Kind() to check if the field is a function
 		if field.Type.Kind() != reflect.Func {
 			return nil, fmt.Errorf("field %s is not a function", field.Name)
 		}
-		// check if the function has the correct signature
+		// check if the function's last return value is an instance of RemoteError
 		if field.Type.NumOut() == 0 || field.Type.Out(field.Type.NumOut()-1) != reflect.TypeOf(RemoteError{}) {
 			return nil, fmt.Errorf("function %s does not have the correct signature", field.Name)
 		}
@@ -101,11 +100,7 @@ func NewCalleeStub(serviceInterface any, serviceObject any, address string, isLo
 	}, nil
 }
 
-// Start launches the TCP server for Callee.
-// It performs the following steps:
-// -- binds to the configured TCP address and starts listening
-// -- continuously accepts new connections
-// -- for each accepted connection, spawns a new goroutine to handle it
+// Start launches the TCP server for Callee. It begins listening for incoming connections and handles them concurrently in separate goroutines. This method is non-blocking and returns immediately after starting the server.
 func (cs *CalleeStub) Start() error {
 	// resolve the TCP address from string format
 	tcpAddr, err := net.ResolveTCPAddr("tcp", cs.address)
@@ -122,8 +117,7 @@ func (cs *CalleeStub) Start() error {
 	cs.listener = listener
 	cs.isRunning.Store(true)
 
-	// continuously accept new connections
-	// use one goroutine per connection for not blocking
+	// continuously accept new connections, use one goroutine per connection for not blocking
 	go func() {
 		for cs.isRunning.Load() {
 			conn, err := listener.Accept()
@@ -142,12 +136,16 @@ func (cs *CalleeStub) Start() error {
 	return nil
 }
 
+// handleConnection processes a single remote method call in an connection.
+// It reads the request, decodes it. After validation, it invokes the specific method on the service object, and sends back the response after encoding it to ReplyMsg.
+// Any errors encountered during this process are reported back to the caller through a ReplyMsg with Success set to false and Err containing the error message.
 func (cs *CalleeStub) handleConnection(conn net.Conn) {
 	defer conn.Close()
 
 	// Wrap the connection in a LeakySocket
 	socket := NewLeakySocket(conn, cs.isLossy, cs.isDelayed)
 
+	// receive the request message from the caller
 	data, err := socket.Recv()
 	if err != nil {
 		return
@@ -162,7 +160,7 @@ func (cs *CalleeStub) handleConnection(conn net.Conn) {
 		return
 	}
 
-	// find the corresponding function in the service interface
+	// lookup the corresponding function in the service object
 	methodVal := cs.objectVal.MethodByName(req.Method)
 	if !methodVal.IsValid() {
 		// if method is not found, send an error message back to the caller
@@ -170,14 +168,14 @@ func (cs *CalleeStub) handleConnection(conn net.Conn) {
 		return
 	}
 
-	// check if the method has the correct signature
+	// verify argument count matches the method signature
 	methodType := methodVal.Type()
 	if methodType.NumIn() != len(req.Args) {
 		cs.sendErrorMessage(conn, fmt.Sprintf("[Callee] argument count mismatch for method %s: expected %d, got %d", req.Method, methodType.NumIn(), len(req.Args)))
 		return
 	}
 
-	// decode arguments and prepare for method call
+	// decode each argument from the gob-encoded byte slice and prepare for local method call
 	args := make([]reflect.Value, len(req.Args))
 	for i, argData := range req.Args {
 		argType := methodType.In(i)
@@ -190,7 +188,7 @@ func (cs *CalleeStub) handleConnection(conn net.Conn) {
 		args[i] = argPtr.Elem()
 	}
 
-	// call the method on the service object
+	// invoke the method with the decoded arguments
 	results := methodVal.Call(args)
 
 	// prepare the reply message
@@ -203,18 +201,23 @@ func (cs *CalleeStub) handleConnection(conn net.Conn) {
 	replyMsg := make([][]byte, len(results))
 	for i, result := range results {
 		var buf bytes.Buffer
-
+		// if the result is an error type, we need to encode the error message string instead of the error object itself because the error object is not serializable
 		if result.Type().Implements(reflect.TypeOf((*error)(nil)).Elem()) {
 			errMessage := ""
 			if !result.IsNil() {
 				errMessage = result.Interface().(error).Error()
 			}
-			if err := gob.NewEncoder(&buf).Encode(errMessage); err != nil {
+
+			// encode the error message string instead of the error object itself
+			err := gob.NewEncoder(&buf).Encode(errMessage)
+			if err != nil {
 				cs.sendErrorMessage(conn, fmt.Sprintf("[Callee] failed to encode result %d for method %s: %v", i, req.Method, err))
 				return
 			}
 		} else {
-			if err := gob.NewEncoder(&buf).EncodeValue(result); err != nil {
+			// for non-error results, we can encode them directly
+			err := gob.NewEncoder(&buf).EncodeValue(result)
+			if err != nil {
 				cs.sendErrorMessage(conn, fmt.Sprintf("[Callee] failed to encode result %d for method %s: %v", i, req.Method, err))
 				return
 			}
@@ -223,14 +226,12 @@ func (cs *CalleeStub) handleConnection(conn net.Conn) {
 	}
 	reply.Reply = replyMsg
 
-	// encode the reply message
+	// encode the reply message and send it back to the caller
 	var replyBuf bytes.Buffer
 	if err := gob.NewEncoder(&replyBuf).Encode(reply); err != nil {
 		cs.sendErrorMessage(conn, fmt.Sprintf("[Callee] failed to encode reply message: %v", err))
 		return
 	}
-
-	// send the reply back to the caller
 	if _, err := socket.Send(replyBuf.Bytes()); err != nil {
 		cs.sendErrorMessage(conn, fmt.Sprintf("[Callee] failed to send reply message: %v", err))
 		return
@@ -268,12 +269,13 @@ func (cs *CalleeStub) IsRunning() bool {
 	return cs.isRunning.Load()
 }
 
-// GetCallCount returns the total number of calls handled by the TCP server across all restarts.
+// GetCallCount returns the total number of calls handled by the TCP server (total number of successful remote procedure calls). across all restarts.
 func (cs *CalleeStub) GetCallCount() int {
 	return int(atomic.LoadInt64(&cs.callCount))
 }
 
-// sendErrorMessage is a helper function to create a response with a RemoteError for a given function type and error message.
+// sendErrorMessage creates a failed ReplyMsg, and sends it back to the caller with the connection.
+// This simplifies the error handling in handleConnection.
 func (cs *CalleeStub) sendErrorMessage(conn net.Conn, errMsg string) error {
 	reply := ReplyMsg{
 		Success: false,
