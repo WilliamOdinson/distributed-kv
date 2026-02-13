@@ -9,9 +9,16 @@ import (
 	"sync"
 )
 
+// EventDetails struct defines the details of an event, including its name, the number of tickets remaining, and the list of attendees. This struct is used to represent the information about each event in the ticket box system, shared between client and server.
+type EventDetail struct {
+	Name             string
+	TicketsRemaining int
+	Attendees        []string
+}
+
 // TicketBoxInterface defines the remote service contract, shared between client and server.
 type TicketBoxInterface struct {
-	GetAllEvents func() ([]string, error, remote.RemoteError)
+	GetAllEvents func() ([]EventDetail, error, remote.RemoteError)
 	GetMyTickets func(user string) ([]string, error, remote.RemoteError)
 	BuyTicket    func(user string, event string) (string, error, remote.RemoteError)
 	RefundTicket func(user string, event string) (string, error, remote.RemoteError)
@@ -33,12 +40,25 @@ type TicketBoxService struct {
 
 // GetAllEvents returns a list of all events.
 // It is designed to not show clients the number of tickets remaining for each event
-func (s *TicketBoxService) GetAllEvents() ([]string, error, remote.RemoteError) {
+func (s *TicketBoxService) GetAllEvents() ([]EventDetail, error, remote.RemoteError) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	events := make([]string, 0, len(s.events))
-	for event := range s.events {
-		events = append(events, event)
+	events := make([]EventDetail, 0, len(s.events))
+
+	for event, remainingTicket := range s.events {
+		attendees := make([]string, 0)
+		for user, tickets := range s.tickets {
+			for _, ticket := range tickets {
+				if ticket == event {
+					attendees = append(attendees, user)
+				}
+			}
+		}
+		events = append(events, EventDetail{
+			Name:             event,
+			TicketsRemaining: remainingTicket,
+			Attendees:        attendees,
+		})
 	}
 	return events, nil, remote.RemoteError{}
 }

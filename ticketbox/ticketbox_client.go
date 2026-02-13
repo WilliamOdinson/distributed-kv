@@ -8,9 +8,16 @@ import (
 	"sync"
 )
 
+// EventDetails struct defines the details of an event, including its name, the number of tickets remaining, and the list of attendees. This struct is used to represent the information about each event in the ticket box system, shared between client and server.
+type EventDetail struct {
+	Name             string
+	TicketsRemaining int
+	Attendees        []string
+}
+
 // TicketBoxInterface defines the remote service contract, shared between client and server.
 type TicketBoxInterface struct {
-	GetAllEvents func() ([]string, error, remote.RemoteError)
+	GetAllEvents func() ([]EventDetail, error, remote.RemoteError)
 	GetMyTickets func(user string) ([]string, error, remote.RemoteError)
 	BuyTicket    func(user string, event string) (string, error, remote.RemoteError)
 	RefundTicket func(user string, event string) (string, error, remote.RemoteError)
@@ -60,7 +67,9 @@ func TestClient(user string, client *TicketBoxInterface) {
 	} else if remoteErr.Error() != "" {
 		log.Printf("Remote error calling GetAllEvents: %v\n", remoteErr)
 	} else {
-		log.Printf("Events: %v\n", events)
+		for _, event := range events {
+			log.Printf("[%s] Event: %s, Tickets Remaining: %d, Attendees: %v\n", user, event.Name, event.TicketsRemaining, event.Attendees)
+		}
 	}
 
 	// 2. get current tickets for this user
@@ -93,7 +102,19 @@ func TestClient(user string, client *TicketBoxInterface) {
 		log.Printf("[%s] has tickets: %v\n", user, tickets)
 	}
 
-	// 5. refund ticket for event "14736" for other users to be able to buy it
+	// 5. get all events again to see the updated tickets remaining and attendees list after purchase
+	events, err, remoteErr = client.GetAllEvents()
+	if err != nil {
+		log.Printf("Error calling GetAllEvents: %v\n", err)
+	} else if remoteErr.Error() != "" {
+		log.Printf("Remote error calling GetAllEvents: %v\n", remoteErr)
+	} else {
+		for _, event := range events {
+			log.Printf("[%s] Event: %s, Tickets Remaining: %d, Attendees: %v\n", user, event.Name, event.TicketsRemaining, event.Attendees)
+		}
+	}
+
+	// 6. refund ticket for event "14736" for other users to be able to buy it
 	refundResult, err, remoteErr := client.RefundTicket(user, "14736")
 	if err != nil {
 		log.Printf("Error calling RefundTicket: %v\n", err)
