@@ -9,6 +9,7 @@ import (
 	"sync"
 )
 
+// TicketBoxInterface defines the remote service contract, shared between client and server.
 type TicketBoxInterface struct {
 	GetAllEvents func() ([]string, error, remote.RemoteError)
 	GetMyTickets func(user string) ([]string, error, remote.RemoteError)
@@ -16,16 +17,18 @@ type TicketBoxInterface struct {
 	RefundTicket func(user string, event string) (string, error, remote.RemoteError)
 }
 
+// Configuration constants for remote service connection, shared between client and server.
 const (
 	address   = "localhost:14736"
 	isLossy   = true
 	isDelayed = true
 )
 
+// TicketBoxService is the implementation of the TicketBoxInterface. It implements all the methods defined in the interface for clients to invoke remotely.
 type TicketBoxService struct {
-	events  map[string]int
-	tickets map[string][]string
-	mu      sync.Mutex
+	events  map[string]int      // map event name to number of tickets remaining
+	tickets map[string][]string // map user name to list of events they have tickets
+	mu      sync.Mutex          // mutex to protect concurrent access to events and tickets
 }
 
 // GetAllEvents returns a list of all events.
@@ -40,14 +43,15 @@ func (s *TicketBoxService) GetAllEvents() ([]string, error, remote.RemoteError) 
 	return events, nil, remote.RemoteError{}
 }
 
-// GetMyTickets returns a list of tickets for a given user.
+// GetMyTickets returns the list of events for which the user has tickets.
 func (s *TicketBoxService) GetMyTickets(user string) ([]string, error, remote.RemoteError) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.tickets[user], nil, remote.RemoteError{}
 }
 
-// BuyTicket allows a user to buy a ticket for an event, if tickets are available and the user doesn't already have a ticket for that event.
+// BuyTicket allows a user to attempt to buy a ticket for an event.
+// It checks whether the user doesn't already have a ticket for the event and if there are still tickets available.
 func (s *TicketBoxService) BuyTicket(user string, event string) (string, error, remote.RemoteError) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -76,6 +80,7 @@ func (s *TicketBoxService) BuyTicket(user string, event string) (string, error, 
 func (s *TicketBoxService) RefundTicket(user string, event string) (string, error, remote.RemoteError) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
 	tickets := s.tickets[user]
 	for i, ticket := range tickets {
 		if ticket == event {

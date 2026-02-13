@@ -8,6 +8,7 @@ import (
 	"sync"
 )
 
+// TicketBoxInterface defines the remote service contract, shared between client and server.
 type TicketBoxInterface struct {
 	GetAllEvents func() ([]string, error, remote.RemoteError)
 	GetMyTickets func(user string) ([]string, error, remote.RemoteError)
@@ -15,6 +16,7 @@ type TicketBoxInterface struct {
 	RefundTicket func(user string, event string) (string, error, remote.RemoteError)
 }
 
+// Configuration constants for remote service connection, shared between client and server.
 const (
 	address   = "localhost:14736"
 	isLossy   = true
@@ -22,12 +24,14 @@ const (
 )
 
 func main() {
+	// create a client stub for the TicketBoxInterface using the remote package's CallerStubCreator.
 	client := &TicketBoxInterface{}
 	if err := remote.CallerStubCreator(client, address, isLossy, isDelayed); err != nil {
 		log.Printf("Failed to register client: %v\n", err)
 		return
 	}
 
+	// test the client by performing a series of operations for multiple users.
 	var wg sync.WaitGroup
 	testUser := []string{"Alice", "Bob", "Charlie"}
 	for _, user := range testUser {
@@ -59,7 +63,7 @@ func TestClient(user string, client *TicketBoxInterface) {
 		log.Printf("Events: %v\n", events)
 	}
 
-	// 2. get my tickets
+	// 2. get current tickets for this user
 	tickets, err, remoteErr := client.GetMyTickets(user)
 	if err != nil {
 		log.Printf("Error calling GetMyTickets: %v\n", err)
@@ -69,7 +73,7 @@ func TestClient(user string, client *TicketBoxInterface) {
 		log.Printf("[%s] has tickets: %v\n", user, tickets)
 	}
 
-	// 3. buy ticket for event "14736"
+	// 3. attempt to buy ticket for event "14736" (limited availability)
 	buyResult, err, remoteErr := client.BuyTicket(user, "14736")
 	if err != nil {
 		log.Printf("Error calling BuyTicket: %v\n", err)
@@ -79,7 +83,7 @@ func TestClient(user string, client *TicketBoxInterface) {
 		log.Printf("[%s] bought ticket: %v\n", user, buyResult)
 	}
 
-	// 4. get my tickets again
+	// 4. verify ticket purchase by getting tickets again
 	tickets, err, remoteErr = client.GetMyTickets(user)
 	if err != nil {
 		log.Printf("Error calling GetMyTickets: %v\n", err)
@@ -89,7 +93,7 @@ func TestClient(user string, client *TicketBoxInterface) {
 		log.Printf("[%s] has tickets: %v\n", user, tickets)
 	}
 
-	// 5. refund ticket for event "14736"
+	// 5. refund ticket for event "14736" for other users to be able to buy it
 	refundResult, err, remoteErr := client.RefundTicket(user, "14736")
 	if err != nil {
 		log.Printf("Error calling RefundTicket: %v\n", err)
