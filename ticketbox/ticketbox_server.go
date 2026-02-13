@@ -76,11 +76,11 @@ func (s *TicketBoxService) BuyTicket(user string, event string) (string, error, 
 func (s *TicketBoxService) RefundTicket(user string, event string) (string, error, remote.RemoteError) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.events[event]++
 	tickets := s.tickets[user]
 	for i, ticket := range tickets {
 		if ticket == event {
 			s.tickets[user] = append(tickets[:i], tickets[i+1:]...)
+			s.events[event]++
 			return fmt.Sprintf("[%s] refund successful for event: %s", user, event), nil, remote.RemoteError{}
 		}
 	}
