@@ -52,17 +52,18 @@ func (s *TicketBoxService) BuyTicket(user string, event string) (string, error, 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// check if the event is sold out
-	if s.events[event] <= 0 {
-		return "", fmt.Errorf("[%s] event %s is sold out", user, event), remote.RemoteError{}
-	}
-
 	// check if the user already has a ticket for the event
 	for _, ticket := range s.tickets[user] {
 		if ticket == event {
 			return "", fmt.Errorf("[%s] user %s already has a ticket for event: %s", user, user, event), remote.RemoteError{}
 		}
 	}
+
+	// check if the event is sold out
+	if s.events[event] <= 0 {
+		return "", fmt.Errorf("[%s] event %s is sold out", user, event), remote.RemoteError{}
+	}
+
 	// sell the ticket, thread safe decrement
 	s.events[event]--
 	s.tickets[user] = append(s.tickets[user], event)
