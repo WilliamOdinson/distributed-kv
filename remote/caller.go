@@ -142,11 +142,24 @@ func CallerStubCreator(serviceInterface any, address string, isLossy bool, isDel
 			returnCount := funcType.NumOut()
 			results := make([]reflect.Value, returnCount)
 			for i := 0; i < returnCount-1; i++ {
-				ptr := reflect.New(funcType.Out(i))
-				if err := gob.NewDecoder(bytes.NewReader(reply.Reply[i])).DecodeValue(ptr); err != nil {
-					return makeCallerErrorResponse(funcType, "[Caller] failed to decode return value: "+err.Error())
+				outType := funcType.Out(i)
+				if outType.Implements(reflect.TypeOf((*error)(nil)).Elem()) {
+					errMessage := ""
+					if err := gob.NewDecoder(bytes.NewReader(reply.Reply[i])).Decode(&errMessage); err != nil {
+						return makeCallerErrorResponse(funcType, "[Caller] failed to decode return value: "+err.Error())
+					}
+					if errMessage != "" {
+						results[i] = reflect.ValueOf(fmt.Errorf("%s", errMessage))
+					} else {
+						results[i] = reflect.Zero(outType)
+					}
+				} else {
+					ptr := reflect.New(outType)
+					if err := gob.NewDecoder(bytes.NewReader(reply.Reply[i])).DecodeValue(ptr); err != nil {
+						return makeCallerErrorResponse(funcType, "[Caller] failed to decode return value: "+err.Error())
+					}
+					results[i] = ptr.Elem()
 				}
-				results[i] = ptr.Elem()
 			}
 			results[returnCount-1] = reflect.Zero(reflect.TypeOf(RemoteError{}))
 			return results

@@ -203,9 +203,21 @@ func (cs *CalleeStub) handleConnection(conn net.Conn) {
 	replyMsg := make([][]byte, len(results))
 	for i, result := range results {
 		var buf bytes.Buffer
-		if err := gob.NewEncoder(&buf).EncodeValue(result); err != nil {
-			cs.sendErrorMessage(conn, fmt.Sprintf("[Callee] failed to encode result %d for method %s: %v", i, req.Method, err))
-			return
+
+		if result.Type().Implements(reflect.TypeOf((*error)(nil)).Elem()) {
+			errMessage := ""
+			if !result.IsNil() {
+				errMessage = result.Interface().(error).Error()
+			}
+			if err := gob.NewEncoder(&buf).Encode(errMessage); err != nil {
+				cs.sendErrorMessage(conn, fmt.Sprintf("[Callee] failed to encode result %d for method %s: %v", i, req.Method, err))
+				return
+			}
+		} else {
+			if err := gob.NewEncoder(&buf).EncodeValue(result); err != nil {
+				cs.sendErrorMessage(conn, fmt.Sprintf("[Callee] failed to encode result %d for method %s: %v", i, req.Method, err))
+				return
+			}
 		}
 		replyMsg[i] = buf.Bytes()
 	}
