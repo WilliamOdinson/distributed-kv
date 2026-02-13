@@ -5,6 +5,7 @@ package main
 import (
 	"fmt"
 	"log"
+	"os"
 	"remote"
 	"sync"
 )
@@ -26,9 +27,9 @@ type TicketBoxInterface struct {
 
 // Configuration constants for remote service connection, shared between client and server.
 const (
-	address   = "localhost:14736"
-	isLossy   = true
-	isDelayed = true
+	defaultAddress = "localhost:14736"
+	isLossy        = true
+	isDelayed      = true
 )
 
 // TicketBoxService is the implementation of the TicketBoxInterface. It implements all the methods defined in the interface for clients to invoke remotely.
@@ -113,6 +114,13 @@ func (s *TicketBoxService) RefundTicket(user string, event string) (string, erro
 }
 
 func main() {
+	address := defaultAddress
+	// accept service address as a command-line argument; default to localhost:14736
+	if len(os.Args) > 1 {
+		address = os.Args[1]
+	}
+	log.Printf("Starting TicketBox server on %s\n", address)
+
 	server := &TicketBoxInterface{}
 	service := &TicketBoxService{
 		events: map[string]int{

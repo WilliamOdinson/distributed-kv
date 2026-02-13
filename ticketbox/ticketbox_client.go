@@ -4,6 +4,7 @@ package main
 
 import (
 	"log"
+	"os"
 	"remote"
 	"sync"
 )
@@ -25,12 +26,18 @@ type TicketBoxInterface struct {
 
 // Configuration constants for remote service connection, shared between client and server.
 const (
-	address   = "localhost:14736"
-	isLossy   = true
-	isDelayed = true
+	defaultAddress = "localhost:14736"
+	isLossy        = true
+	isDelayed      = true
 )
 
 func main() {
+	address := defaultAddress
+	if len(os.Args) > 1 {
+		address = os.Args[1]
+	}
+	log.Printf("Connecting to TicketBox server at %s\n", address)
+
 	// create a client stub for the TicketBoxInterface using the remote package's CallerStubCreator.
 	client := &TicketBoxInterface{}
 	if err := remote.CallerStubCreator(client, address, isLossy, isDelayed); err != nil {
