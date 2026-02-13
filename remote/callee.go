@@ -158,7 +158,7 @@ func (cs *CalleeStub) handleConnection(conn net.Conn) {
 	var reqBuf bytes.Buffer
 	reqBuf.Write(data)
 	if err := gob.NewDecoder(&reqBuf).Decode(&req); err != nil {
-		cs.SendErrorMessage(conn, "[Callee] failed to decode request: "+err.Error())
+		cs.sendErrorMessage(conn, "[Callee] failed to decode request: "+err.Error())
 		return
 	}
 
@@ -166,14 +166,14 @@ func (cs *CalleeStub) handleConnection(conn net.Conn) {
 	methodVal := cs.objectVal.MethodByName(req.Method)
 	if !methodVal.IsValid() {
 		// if method is not found, send an error message back to the caller
-		cs.SendErrorMessage(conn, "[Callee] method not found: "+req.Method)
+		cs.sendErrorMessage(conn, "[Callee] method not found: "+req.Method)
 		return
 	}
 
 	// check if the method has the correct signature
 	methodType := methodVal.Type()
 	if methodType.NumIn() != len(req.Args) {
-		cs.SendErrorMessage(conn, fmt.Sprintf("[Callee] argument count mismatch for method %s: expected %d, got %d", req.Method, methodType.NumIn(), len(req.Args)))
+		cs.sendErrorMessage(conn, fmt.Sprintf("[Callee] argument count mismatch for method %s: expected %d, got %d", req.Method, methodType.NumIn(), len(req.Args)))
 		return
 	}
 
@@ -184,7 +184,7 @@ func (cs *CalleeStub) handleConnection(conn net.Conn) {
 		argPtr := reflect.New(argType)
 		argBuf := bytes.NewBuffer(argData)
 		if err := gob.NewDecoder(argBuf).Decode(argPtr.Interface()); err != nil {
-			cs.SendErrorMessage(conn, fmt.Sprintf("[Callee] failed to decode argument %d for method %s: %v", i, req.Method, err))
+			cs.sendErrorMessage(conn, fmt.Sprintf("[Callee] failed to decode argument %d for method %s: %v", i, req.Method, err))
 			return
 		}
 		args[i] = argPtr.Elem()
@@ -204,7 +204,7 @@ func (cs *CalleeStub) handleConnection(conn net.Conn) {
 	for i, result := range results {
 		var buf bytes.Buffer
 		if err := gob.NewEncoder(&buf).EncodeValue(result); err != nil {
-			cs.SendErrorMessage(conn, fmt.Sprintf("[Callee] failed to encode result %d for method %s: %v", i, req.Method, err))
+			cs.sendErrorMessage(conn, fmt.Sprintf("[Callee] failed to encode result %d for method %s: %v", i, req.Method, err))
 			return
 		}
 		replyMsg[i] = buf.Bytes()
@@ -214,13 +214,13 @@ func (cs *CalleeStub) handleConnection(conn net.Conn) {
 	// encode the reply message
 	var replyBuf bytes.Buffer
 	if err := gob.NewEncoder(&replyBuf).Encode(reply); err != nil {
-		cs.SendErrorMessage(conn, fmt.Sprintf("[Callee] failed to encode reply message: %v", err))
+		cs.sendErrorMessage(conn, fmt.Sprintf("[Callee] failed to encode reply message: %v", err))
 		return
 	}
 
 	// send the reply back to the caller
 	if _, err := socket.Send(replyBuf.Bytes()); err != nil {
-		cs.SendErrorMessage(conn, fmt.Sprintf("[Callee] failed to send reply message: %v", err))
+		cs.sendErrorMessage(conn, fmt.Sprintf("[Callee] failed to send reply message: %v", err))
 		return
 	}
 
@@ -261,8 +261,8 @@ func (cs *CalleeStub) GetCallCount() int {
 	return int(atomic.LoadInt64(&cs.callCount))
 }
 
-// SendErrorMessage is a helper function to create a response with a RemoteError for a given function type and error message.
-func (cs *CalleeStub) SendErrorMessage(conn net.Conn, errMsg string) error {
+// sendErrorMessage is a helper function to create a response with a RemoteError for a given function type and error message.
+func (cs *CalleeStub) sendErrorMessage(conn net.Conn, errMsg string) error {
 	reply := ReplyMsg{
 		Success: false,
 		Err:     RemoteError{Err: errMsg},
