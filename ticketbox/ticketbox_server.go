@@ -21,7 +21,7 @@ type EventDetail struct {
 type TicketBoxInterface struct {
 	GetAllEvents func() ([]EventDetail, error, remote.RemoteError)
 	GetMyTickets func(user string) ([]string, error, remote.RemoteError)
-	BuyTicket    func(user string, event string) (string, error, remote.RemoteError)
+	BuyTickets   func(user string, events []string) (string, error, remote.RemoteError)
 	RefundTicket func(user string, event string) (string, error, remote.RemoteError)
 }
 
@@ -72,30 +72,34 @@ func (s *TicketBoxService) GetMyTickets(user string) ([]string, error, remote.Re
 	return s.tickets[user], nil, remote.RemoteError{}
 }
 
-// BuyTicket allows a user to attempt to buy a ticket for an event.
-// It checks whether the user doesn't already have a ticket for the event and if there are still tickets available.
-func (s *TicketBoxService) BuyTicket(user string, event string) (string, error, remote.RemoteError) {
+// BuyTickets allows a user to attempt to buy tickets for multiple events.
+// It checks whether the user doesn't already have a ticket for each event and if there are still tickets available.
+func (s *TicketBoxService) BuyTickets(user string, events []string) (string, error, remote.RemoteError) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// check if the user already has a ticket for the event
-	for _, ticket := range s.tickets[user] {
-		if ticket == event {
-			return "", fmt.Errorf("[%s] user %s already has a ticket for event: %s", user, user, event), remote.RemoteError{}
+	// check if the user already has a ticket for any of the events
+	for _, event := range events {
+		for _, ticket := range s.tickets[user] {
+			if ticket == event {
+				return "", fmt.Errorf("[%s] user %s already has a ticket for event: %s", user, user, event), remote.RemoteError{}
+			}
+		}
+
+		// check if the event is sold out
+		if s.events[event] <= 0 {
+			return "", fmt.Errorf("[%s] event %s is sold out", user, event), remote.RemoteError{}
 		}
 	}
 
-	// check if the event is sold out
-	if s.events[event] <= 0 {
-		return "", fmt.Errorf("[%s] event %s is sold out", user, event), remote.RemoteError{}
+	// sell the ticket, thread safe decrement
+	for _, event := range events {
+		s.events[event]--
+		s.tickets[user] = append(s.tickets[user], event)
 	}
 
-	// sell the ticket, thread safe decrement
-	s.events[event]--
-	s.tickets[user] = append(s.tickets[user], event)
-
 	// return success message
-	return fmt.Sprintf("[%s] bought 1 ticket for event: %s", user, event), nil, remote.RemoteError{}
+	return fmt.Sprintf("[%s] bought %d tickets for events: %v", user, len(events), events), nil, remote.RemoteError{}
 }
 
 // RefundTicket allows a user to refund a ticket for an event, if they have a ticket for that event.

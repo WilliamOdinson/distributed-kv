@@ -20,7 +20,7 @@ type EventDetail struct {
 type TicketBoxInterface struct {
 	GetAllEvents func() ([]EventDetail, error, remote.RemoteError)
 	GetMyTickets func(user string) ([]string, error, remote.RemoteError)
-	BuyTicket    func(user string, event string) (string, error, remote.RemoteError)
+	BuyTickets   func(user string, events []string) (string, error, remote.RemoteError)
 	RefundTicket func(user string, event string) (string, error, remote.RemoteError)
 }
 
@@ -105,11 +105,11 @@ func TestClient(user string, client *TicketBoxInterface) {
 	}
 
 	// 3. attempt to buy ticket for event "14736" (limited availability)
-	buyResult, err, remoteErr := client.BuyTicket(user, "14736")
+	buyResult, err, remoteErr := client.BuyTickets(user, []string{"14736", "15513", "15619"})
 	if err != nil {
-		log.Printf("Error calling BuyTicket: %v\n", err)
+		log.Printf("Error calling BuyTickets: %v\n", err)
 	} else if remoteErr.Error() != "" {
-		log.Printf("Remote error calling BuyTicket: %v\n", remoteErr)
+		log.Printf("Remote error calling BuyTickets: %v\n", remoteErr)
 	} else {
 		log.Printf("[%s] bought ticket: %v\n", user, buyResult)
 	}
