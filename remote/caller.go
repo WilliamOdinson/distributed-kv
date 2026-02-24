@@ -82,7 +82,6 @@ func CallerStubCreator(serviceInterface any, address string, isLossy bool, isDel
 				if err != nil {
 					return makeCallerErrorResponse(funcType, fmt.Sprintf("[Caller] failed to connect to remote callee: %v", err))
 				}
-				defer conn.Close()
 
 				// wrap connection in leaky socket
 				leakyConn := NewLeakySocket(conn, isLossy, isDelayed)
@@ -90,6 +89,7 @@ func CallerStubCreator(serviceInterface any, address string, isLossy bool, isDel
 				// attempt to send; if the packet is dropped, retry with a new connection
 				sent, err := leakyConn.Send(reqBuf.Bytes())
 				if err != nil || !sent {
+					conn.Close()
 					continue // packet lost, should retry
 				}
 
@@ -98,6 +98,7 @@ func CallerStubCreator(serviceInterface any, address string, isLossy bool, isDel
 				replyMsg, err := leakyConn.Recv()
 
 				if err != nil {
+					conn.Close()
 					continue // packet lost, should retry
 				}
 
@@ -106,6 +107,7 @@ func CallerStubCreator(serviceInterface any, address string, isLossy bool, isDel
 					return makeCallerErrorResponse(funcType, fmt.Sprintf("[Caller] failed to decode reply message from remote callee: %v", err))
 				}
 				flag = true
+				conn.Close()
 			}
 
 			// if the reply indicates a remote error, construct the return values with the error message.
