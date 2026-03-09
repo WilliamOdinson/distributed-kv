@@ -260,6 +260,7 @@ func NewRaftPeer(peerInfo []RaftSetupInfo, index int) {
 		rp.peerStubs = append(rp.peerStubs, stub)
 	}
 
+	go rp.run()
 	<-rp.ch
 }
 
