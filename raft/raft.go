@@ -90,6 +90,7 @@ type RaftPeer struct {
 	mu sync.Mutex
 
 	id           int
+	totalPeers   int
 	isActivate   bool
 	isTerminated bool
 	isLeader     bool
@@ -104,6 +105,7 @@ type RaftPeer struct {
 
 	raftCalleeStub    remote.Callee
 	controlCalleeStub remote.Callee
+	peerStubs         []*RaftInterface
 }
 
 type LogEntry struct {
@@ -136,6 +138,7 @@ func NewRaftPeer(peerInfo []RaftSetupInfo, index int) {
 	// the same address).
 	rp := &RaftPeer{
 		id:           peerInfo[index].Id,
+		totalPeers:   len(peerInfo),
 		isActivate:   false,
 		isTerminated: false,
 		isLeader:     false,
@@ -163,6 +166,15 @@ func NewRaftPeer(peerInfo []RaftSetupInfo, index int) {
 		panic(err)
 	}
 	rp.raftCalleeStub = raftStub
+
+	for i, info := range peerInfo {
+		if i == index {
+			continue
+		}
+		stub := &RaftInterface{}
+		remote.CallerStubCreator(stub, info.Addr, false, false)
+		rp.peerStubs = append(rp.peerStubs, stub)
+	}
 }
 
 //// method implementations for the ControlInterface
