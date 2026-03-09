@@ -78,6 +78,7 @@ type RaftPeer struct {
 	id           int
 	isActivate   bool
 	isTerminated bool
+	isLeader     bool
 
 	currentTerm int
 	votedFor    int
@@ -223,6 +224,16 @@ func (rp *RaftPeer) GetStatus() (StatusReport, remote.RemoteError) {
 // index.
 //
 // TODO: implement the GetCommittedCmd remote method
+func (rp *RaftPeer) GetCommittedCmd(index int) ([]byte, remote.RemoteError) {
+	rp.mu.Lock()
+	defer rp.mu.Unlock()
+
+	if index < len(rp.log) && index <= rp.commitIndex {
+		return rp.log[index].Command, remote.RemoteError{}
+	}
+
+	return nil, remote.RemoteError{}
+}
 
 // * NewCommand -- this remote method is used exclusively by the Controller. this method
 // emulates submission of a new command by a Raft client to this Raft peer, which should be
@@ -233,6 +244,35 @@ func (rp *RaftPeer) GetStatus() (StatusReport, remote.RemoteError) {
 // received.
 //
 // TODO: implement the NewCommand remote method
+func (rp *RaftPeer) NewCommand(command []byte) (StatusReport, remote.RemoteError) {
+	rp.mu.Lock()
+	defer rp.mu.Unlock()
+
+	if !rp.isActivate {
+		return StatusReport{
+			Index:     0,
+			Term:      rp.currentTerm,
+			Leader:    false,
+			Active:    rp.isActivate,
+			CallCount: 0,
+		}, remote.RemoteError{}
+	}
+
+	if rp.isActivate && !rp.isTerminated && rp.isLeader {
+		rp.log = append(rp.log, LogEntry{
+			Term:    rp.currentTerm,
+			Command: command,
+		})
+	}
+
+	return StatusReport{
+		Index:     len(rp.log) - 1,
+		Term:      rp.currentTerm,
+		Leader:    rp.isLeader,
+		Active:    rp.isActivate,
+		CallCount: 0,
+	}, remote.RemoteError{}
+}
 
 //// method implementations for the RaftInterface
 
