@@ -27,21 +27,166 @@ package raft
 // - don't forget to ask for help!
 
 import (
+	"math/rand"
 	"remote"
+	"sync"
+	"sync/atomic"
+	"time"
 )
+
+const ()
+
+func (rp *RaftPeer) run() {
+	for {
+		time.Sleep(PollInterval)
+		rp.mu.Lock()
+		if rp.isTerminated {
+			rp.mu.Unlock()
+			return
+		}
+		if !rp.isActivate {
+			rp.mu.Unlock()
+			continue
+		}
+		now := time.Now()
+		if rp.isLeader && now.Sub(rp.lastHeartbeatTime) >= HeartbeatInterval {
+			// send heartbeats to followers
+			for _, stub := range rp.peerStubs {
+				go func(stub *RaftInterface) {
+					replyTerm, _, remoteErr := stub.AppendEntries(rp.currentTerm, rp.id, 0, 0, nil, 0)
+					if remoteErr.Error() != "" {
+						// handle remote error: simply return and wait for the next heartbeat
+						return
+					}
+					if replyTerm > rp.currentTerm {
+						// step down to follower
+						rp.currentTerm = replyTerm
+						rp.isLeader = false
+						rp.isCandidate = false
+						rp.votedFor = -1
+					}
+				}(stub)
+			}
+			rp.lastHeartbeatTime = now
+			rp.mu.Unlock()
+		} else if !rp.isLeader && now.Sub(rp.lastHeartbeatTime) >= rp.electionTimeout {
+			rp.mu.Unlock()
+			rp.StartElection()
+		} else {
+			rp.mu.Unlock()
+		}
+	}
+}
+
+func (rp *RaftPeer) StartElection() {
+	rp.mu.Lock()
+
+	if !rp.isActivate || rp.isTerminated {
+		rp.mu.Unlock()
+		return
+	}
+
+	rp.isCandidate = true
+	rp.currentTerm++
+	rp.votedFor = rp.id
+	rp.resetElectionTimeout()
+	rp.mu.Unlock()
+
+	var votesReceived int64 = 1 // vote for self
+	var wg sync.WaitGroup
+
+	for _, stub := range rp.peerStubs {
+		wg.Add(1)
+		go func(stub *RaftInterface) {
+			defer wg.Done()
+			replyTerm, voteGranted, remoteErr := stub.RequestVote(rp.currentTerm, rp.id, 0, 0)
+			if remoteErr.Error() != "" {
+				// handle remote error: simply return and wait for the next election timeout
+				return
+			}
+			rp.mu.Lock()
+			if replyTerm > rp.currentTerm {
+				// step down to follower
+				rp.currentTerm = replyTerm
+				rp.isLeader = false
+				rp.isCandidate = false
+				rp.votedFor = -1
+			} else if voteGranted {
+				atomic.AddInt64(&votesReceived, 1)
+				if int(votesReceived) >= (rp.totalPeers+1)/2 {
+					// become leader
+					rp.isLeader = true
+					rp.isCandidate = false
+					rp.lastHeartBeatSentTime = time.Now()
+				}
+			}
+			rp.mu.Unlock()
+		}(stub)
+	}
+	wg.Wait()
+}
+
+func (rp *RaftPeer) resetElectionTimeout() {
+	seed := rand.Intn(ElectionTimeoutMax-ElectionTimeoutMin) + ElectionTimeoutMin
+
+	rp.electionTimeout = time.Duration(seed) * time.Millisecond
+	rp.lastHeartbeatTime = time.Now()
+}
 
 func (rp *RaftPeer) RequestVote(term int, candidateId int, lastLogIndex int, lastLogTerm int) (int, bool, remote.RemoteError) {
 	rp.mu.Lock()
 	defer rp.mu.Unlock()
 
-	return 0, false, remote.RemoteError{}
+	if term < rp.currentTerm {
+		return rp.currentTerm, false, remote.RemoteError{}
+	}
+
+	if term > rp.currentTerm {
+		rp.currentTerm = term
+		rp.isLeader = false
+		rp.isCandidate = false
+		rp.votedFor = -1
+	}
+
+	if (rp.votedFor == -1 || rp.votedFor == candidateId) && rp.isUpToDate(lastLogIndex, lastLogTerm) {
+		rp.votedFor = candidateId
+		rp.resetElectionTimeout()
+		return rp.currentTerm, true, remote.RemoteError{}
+	}
+
+	return rp.currentTerm, false, remote.RemoteError{}
+}
+
+func (rp *RaftPeer) isUpToDate(lastLogIndex int, lastLogTerm int) bool {
+	if len(rp.log) == 0 {
+		return true
+	}
+	lastEntry := rp.log[len(rp.log)-1]
+	if lastLogTerm != lastEntry.Term {
+		return lastLogTerm > lastEntry.Term
+	}
+	return lastLogIndex >= len(rp.log)-1
 }
 
 func (rp *RaftPeer) AppendEntries(term int, leaderId int, prevLogIndex int, prevLogTerm int, entries []int, leaderCommit int) (int, bool, remote.RemoteError) {
 	rp.mu.Lock()
 	defer rp.mu.Unlock()
 
-	return 0, false, remote.RemoteError{}
+	if term < rp.currentTerm {
+		return rp.currentTerm, false, remote.RemoteError{}
+	}
+	if term > rp.currentTerm {
+		rp.currentTerm = term
+		rp.isLeader = false
+		rp.isCandidate = false
+		rp.votedFor = -1
+	}
+
+	rp.isLeader = false
+	rp.isCandidate = false
+	rp.resetElectionTimeout()
+
+	return rp.currentTerm, true, remote.RemoteError{}
 }
 
 // TODO: you will need to define a struct that contains the parameters/variables that define
@@ -78,6 +223,7 @@ func NewRaftPeer(peerInfo []RaftSetupInfo, index int) {
 		isActivate:   false,
 		isTerminated: false,
 		isLeader:     false,
+		isCandidate:  false,
 
 		currentTerm: 0,
 		votedFor:    -1,

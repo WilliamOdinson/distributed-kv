@@ -3,6 +3,14 @@ package raft
 import (
 	"remote"
 	"sync"
+	"time"
+)
+
+const (
+	PollInterval       = 15 * time.Millisecond // how often run() checks for timeouts
+	HeartbeatInterval  = 50 * time.Millisecond // leader sends heartbeats this often
+	ElectionTimeoutMin = 150                   // minimum election timeout in ms
+	ElectionTimeoutMax = 300                   // maximum election timeout in ms
 )
 
 // Controller sends to Raft peer at creation time. do not change.
@@ -54,6 +62,7 @@ type RaftPeer struct {
 	isActivate   bool
 	isTerminated bool
 	isLeader     bool
+	isCandidate  bool
 
 	currentTerm int
 	votedFor    int
@@ -67,4 +76,9 @@ type RaftPeer struct {
 	controlCalleeStub remote.Callee
 	peerStubs         []*RaftInterface
 	ch                chan struct{}
+
+	lastHeartbeatTime     time.Time
+	electionTimeout       time.Duration
+	lastHeartBeatSentTime time.Time
+	randomTimeout         time.Duration
 }
