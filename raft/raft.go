@@ -28,6 +28,7 @@ package raft
 
 import (
 	"remote"
+	"sync"
 )
 
 // Controller sends to Raft peer at creation time. do not change.
@@ -71,6 +72,30 @@ type ControlInterface struct {
 // struct, and the test code doesn't really care what state it contains, so this part is up
 // to you.
 
+type RaftPeer struct {
+	mu sync.Mutex
+
+	id           int
+	isActivate   bool
+	isTerminated bool
+
+	currentTerm int
+	votedFor    int
+	log         []LogEntry
+	commitIndex int
+	lastApplied int
+	nextIndex   []int
+	matchIndex  []int
+
+	raftCalleeStub    remote.Callee
+	controlCalleeStub remote.Callee
+}
+
+type LogEntry struct {
+	Term    int
+	Command []byte
+}
+
 // the Controller calls NewRaftPeer in its own go routine to spawn a new Raft peer. the
 // arguments contain everything needed for the new Raft peer to determine its own identity and
 // callee addresses as well as the relevant callee address of all other Raft peers. examples
@@ -110,6 +135,16 @@ func NewRaftPeer(peerInfo []RaftSetupInfo, index int) {
 //
 // TODO: implement the Activate remote method
 
+func (rp *RaftPeer) Activate() remote.RemoteError {
+	rp.mu.Lock()
+	defer rp.mu.Unlock()
+
+	rp.isActivate = true
+	rp.raftCalleeStub.Start()
+
+	return remote.RemoteError{}
+}
+
 // * Deactivate -- this remote method performs the "inverse" operation to Activate, namely to
 // stop the underlying server in the Raft peer to emulate disconnection / failure of the Raft
 // peer. when called, the Raft peer should disable only the stub serving the RaftInterface,
@@ -122,12 +157,37 @@ func NewRaftPeer(peerInfo []RaftSetupInfo, index int) {
 //
 // TODO: implement the Deactivate remote method
 
+func (rp *RaftPeer) Deactivate() remote.RemoteError {
+	rp.mu.Lock()
+	defer rp.mu.Unlock()
+
+	rp.isActivate = false
+	rp.isTerminated = true
+	rp.raftCalleeStub.Stop()
+	return remote.RemoteError{}
+}
+
 // * Terminate -- this remote method is used exclusively by the Controller to permanently
 // cease operation of the Raft peer. this is called at the end of each test when the Raft peer
 // is no longer needed, and it allows the Raft peer to completely terminate all services and
 // delete all relevant state.
 //
 // TODO: implement the Terminate remote method
+
+func (rp *RaftPeer) Terminate() remote.RemoteError {
+	rp.mu.Lock()
+	defer rp.mu.Unlock()
+	if rp.isTerminated {
+		return remote.RemoteError{}
+	}
+	rp.isTerminated = true
+	rp.isActivate = false
+
+	rp.raftCalleeStub.Stop()
+	rp.controlCalleeStub.Stop()
+
+	return remote.RemoteError{}
+}
 
 // * GetStatus -- this remote method is used exclusively by the Controller. this method takes
 // no arguments and is essentially a "getter" for the state of the Raft peer, including the
@@ -136,6 +196,24 @@ func NewRaftPeer(peerInfo []RaftSetupInfo, index int) {
 // method returns a StatusReport as defined above.
 //
 // TODO: implement the GetStatus remote method
+
+func (rp *RaftPeer) GetStatus() (StatusReport, remote.RemoteError) {
+	rp.mu.Lock()
+	defer rp.mu.Unlock()
+	callCount := 0
+
+	if rp.isActivate {
+		callCount = rp.raftCalleeStub.GetCallCount()
+	}
+
+	return StatusReport{
+		Index:     0,
+		Term:      rp.currentTerm,
+		Leader:    false,
+		Active:    rp.isActivate,
+		CallCount: callCount,
+	}, remote.RemoteError{}
+}
 
 // * GetCommittedCmd -- this remote method is used exclusively by the Controller. this method
 // provides an input argument `index`. if the Raft peer has a log entry at the given `index`,
