@@ -217,7 +217,7 @@ func (rp *RaftPeer) Deactivate() remote.RemoteError {
 	defer rp.mu.Unlock()
 
 	rp.isActivate = false
-	rp.isTerminated = true
+
 	rp.raftCalleeStub.Stop()
 	return remote.RemoteError{}
 }
