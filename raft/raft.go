@@ -106,6 +106,7 @@ type RaftPeer struct {
 	raftCalleeStub    remote.Callee
 	controlCalleeStub remote.Callee
 	peerStubs         []*RaftInterface
+	ch                chan struct{}
 }
 
 type LogEntry struct {
@@ -150,6 +151,8 @@ func NewRaftPeer(peerInfo []RaftSetupInfo, index int) {
 		lastApplied: 0,
 		nextIndex:   make([]int, len(peerInfo)),
 		matchIndex:  make([]int, len(peerInfo)),
+
+		ch: make(chan struct{}),
 	}
 
 	// create Callee stubs for ControlInterface, should start immediately
@@ -175,6 +178,8 @@ func NewRaftPeer(peerInfo []RaftSetupInfo, index int) {
 		remote.CallerStubCreator(stub, info.Addr, false, false)
 		rp.peerStubs = append(rp.peerStubs, stub)
 	}
+
+	<-rp.ch
 }
 
 //// method implementations for the ControlInterface
@@ -240,6 +245,8 @@ func (rp *RaftPeer) Terminate() remote.RemoteError {
 
 	rp.raftCalleeStub.Stop()
 	rp.controlCalleeStub.Stop()
+
+	rp.ch <- struct{}{}
 
 	return remote.RemoteError{}
 }
