@@ -255,16 +255,13 @@ func (rp *RaftPeer) Terminate() remote.RemoteError {
 func (rp *RaftPeer) GetStatus() (StatusReport, remote.RemoteError) {
 	rp.mu.Lock()
 	defer rp.mu.Unlock()
-	callCount := 0
 
-	if rp.isActivate {
-		callCount = rp.raftCalleeStub.GetCallCount()
-	}
+	callCount := rp.raftCalleeStub.GetCallCount()
 
 	return StatusReport{
 		Index:     0,
 		Term:      rp.currentTerm,
-		Leader:    false,
+		Leader:    rp.isLeader,
 		Active:    rp.isActivate,
 		CallCount: callCount,
 	}, remote.RemoteError{}
