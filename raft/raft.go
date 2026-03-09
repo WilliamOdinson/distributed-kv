@@ -50,8 +50,22 @@ type StatusReport struct {
 // empty template for the "service interface" that specifies remote calls between Raft peers.
 // it must include the two remote methods needed for the Raft algorithm.
 type RaftInterface struct {
-	// TODO: define the request-vote remote method, which you can name and structure however you desire
-	// TODO: define the append-entries remote method, which you can name and structure however you desire
+	RequestVote   func(term int, candidateId int, lastLogIndex int, lastLogTerm int) (int, bool, remote.RemoteError)
+	AppendEntries func(term int, leaderId int, prevLogIndex int, prevLogTerm int, entries []int, leaderCommit int) (int, bool, remote.RemoteError)
+}
+
+func (rp *RaftPeer) RequestVote(term int, candidateId int, lastLogIndex int, lastLogTerm int) (int, bool, remote.RemoteError) {
+	rp.mu.Lock()
+	defer rp.mu.Unlock()
+
+	return 0, false, remote.RemoteError{}
+}
+
+func (rp *RaftPeer) AppendEntries(term int, leaderId int, prevLogIndex int, prevLogTerm int, entries []int, leaderCommit int) (int, bool, remote.RemoteError) {
+	rp.mu.Lock()
+	defer rp.mu.Unlock()
+
+	return 0, false, remote.RemoteError{}
 }
 
 // complete template for the Control "service interface" that specifies remote calls from
