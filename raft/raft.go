@@ -120,7 +120,35 @@ func NewRaftPeer(peerInfo []RaftSetupInfo, index int) {
 	// commands to a different Raft peer in the group. the addresses provided by the
 	// Controller are guaranteed to be unique (i.e., no peers will have the same ID or use
 	// the same address).
+	rp := &RaftPeer{
+		id:           peerInfo[index].Id,
+		isActivate:   false,
+		isTerminated: false,
+		isLeader:     false,
 
+		currentTerm: 0,
+		votedFor:    -1,
+		log:         make([]LogEntry, 0),
+		commitIndex: 0,
+		lastApplied: 0,
+		nextIndex:   make([]int, len(peerInfo)),
+		matchIndex:  make([]int, len(peerInfo)),
+	}
+
+	// create Callee stubs for ControlInterface, should start immediately
+	controlStub, err := remote.NewCalleeStub(&ControlInterface{}, rp, peerInfo[index].Caddr, false, false)
+	if err != nil {
+		panic(err)
+	}
+	rp.controlCalleeStub = controlStub
+	rp.controlCalleeStub.Start()
+
+	// create Callee stubs for RaftInterface, should not start until Activate is called
+	raftStub, err := remote.NewCalleeStub(&RaftInterface{}, rp, peerInfo[index].Addr, false, false)
+	if err != nil {
+		panic(err)
+	}
+	rp.raftCalleeStub = raftStub
 }
 
 //// method implementations for the ControlInterface
