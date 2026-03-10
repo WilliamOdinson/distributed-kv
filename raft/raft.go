@@ -49,15 +49,22 @@ func (rp *RaftPeer) run() {
 			continue
 		}
 		now := time.Now()
+
+		term := rp.currentTerm
+		leaderId := rp.id
+		rp.lastHeartBeatSentTime = now
+		rp.mu.Unlock()
+
 		if rp.isLeader && now.Sub(rp.lastHeartbeatTime) >= HeartbeatInterval {
 			// send heartbeats to followers
 			for _, stub := range rp.peerStubs {
 				go func(stub *RaftInterface) {
-					replyTerm, _, remoteErr := stub.AppendEntries(rp.currentTerm, rp.id, 0, 0, nil, 0)
+					replyTerm, _, remoteErr := stub.AppendEntries(term, leaderId, 0, 0, nil, 0)
 					if remoteErr.Error() != "" {
 						// handle remote error: simply return and wait for the next heartbeat
 						return
 					}
+					rp.mu.Lock()
 					if replyTerm > rp.currentTerm {
 						// step down to follower
 						rp.currentTerm = replyTerm
@@ -65,6 +72,7 @@ func (rp *RaftPeer) run() {
 						rp.isCandidate = false
 						rp.votedFor = -1
 					}
+					rp.mu.Unlock()
 				}(stub)
 			}
 			rp.lastHeartbeatTime = now
@@ -97,9 +105,11 @@ func (rp *RaftPeer) StartElection() {
 
 	for _, stub := range rp.peerStubs {
 		wg.Add(1)
+		term := rp.currentTerm
+		leaderId := rp.id
 		go func(stub *RaftInterface) {
 			defer wg.Done()
-			replyTerm, voteGranted, remoteErr := stub.RequestVote(rp.currentTerm, rp.id, 0, 0)
+			replyTerm, voteGranted, remoteErr := stub.RequestVote(term, leaderId, 0, 0)
 			if remoteErr.Error() != "" {
 				// handle remote error: simply return and wait for the next election timeout
 				return
