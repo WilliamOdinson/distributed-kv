@@ -97,6 +97,8 @@ func (rp *RaftPeer) StartElection() {
 	rp.currentTerm++
 	rp.votedFor = rp.id
 	rp.resetElectionTimeout()
+	term := rp.currentTerm
+	leaderId := rp.id
 	rp.mu.Unlock()
 
 	var votesReceived int64 = 1 // vote for self
@@ -104,8 +106,6 @@ func (rp *RaftPeer) StartElection() {
 
 	for _, stub := range rp.peerStubs {
 		wg.Add(1)
-		term := rp.currentTerm
-		leaderId := rp.id
 		go func(stub *RaftInterface) {
 			defer wg.Done()
 			replyTerm, voteGranted, remoteErr := stub.RequestVote(term, leaderId, 0, 0)
