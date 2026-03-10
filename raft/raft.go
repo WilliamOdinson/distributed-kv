@@ -87,13 +87,13 @@ func (rp *RaftPeer) run() {
 					if replyOK {
 						rp.nextIndex[idx] = prevLogIndex + len(entries) + 1
 						rp.matchIndex[idx] = rp.nextIndex[idx] - 1
+						rp.commitIndex = rp.calculateCommitIndex()
 					} else {
 						rp.nextIndex[idx] = max(1, rp.nextIndex[idx]-1)
 					}
 					rp.mu.Unlock()
 				}(stub)
 			}
-			rp.commitIndex = rp.calculateCommitIndex()
 			rp.lastHeartbeatTime = now
 			rp.mu.Unlock()
 		} else if !rp.isLeader && now.Sub(rp.lastHeartbeatTime) >= rp.electionTimeout {
