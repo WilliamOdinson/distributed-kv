@@ -66,7 +66,8 @@ func (rp *RaftPeer) run() {
 				if prevLogIndex >= len(rp.log) {
 					prevLogIndex = len(rp.log) - 1
 				}
-				entries := rp.log[rp.nextIndex[idx]:]
+				entries := make([]LogEntry, len(rp.log)-rp.nextIndex[idx])
+				copy(entries, rp.log[rp.nextIndex[idx]:])
 				commitIdx := rp.commitIndex
 
 				go func(stub *RaftInterface) {
