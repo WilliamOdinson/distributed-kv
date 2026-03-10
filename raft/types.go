@@ -38,7 +38,7 @@ type LogEntry struct {
 // it must include the two remote methods needed for the Raft algorithm.
 type RaftInterface struct {
 	RequestVote   func(term int, candidateId int, lastLogIndex int, lastLogTerm int) (int, bool, remote.RemoteError)
-	AppendEntries func(term int, leaderId int, prevLogIndex int, prevLogTerm int, entries []int, leaderCommit int) (int, bool, remote.RemoteError)
+	AppendEntries func(term int, leaderId int, prevLogIndex int, prevLogTerm int, entries []LogEntry, leaderCommit int) (int, bool, remote.RemoteError)
 }
 
 // complete template for the Control "service interface" that specifies remote calls from

@@ -29,6 +29,7 @@ package raft
 import (
 	"math/rand"
 	"remote"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -56,9 +57,20 @@ func (rp *RaftPeer) run() {
 
 		if rp.isLeader && now.Sub(rp.lastHeartbeatTime) >= HeartbeatInterval {
 			// send heartbeats to followers
-			for _, stub := range rp.peerStubs {
+			for idx, stub := range rp.peerStubs {
+				prevLogIndex := rp.nextIndex[idx] - 1
+				prevLogTerm := 0
+				if prevLogIndex >= 0 && prevLogIndex < len(rp.log) {
+					prevLogTerm = rp.log[prevLogIndex].Term
+				}
+				if prevLogIndex >= len(rp.log) {
+					prevLogIndex = len(rp.log) - 1
+				}
+				entries := rp.log[rp.nextIndex[idx]:]
+				commitIdx := rp.commitIndex
+
 				go func(stub *RaftInterface) {
-					replyTerm, _, remoteErr := stub.AppendEntries(term, leaderId, 0, 0, nil, 0)
+					replyTerm, replyOK, remoteErr := stub.AppendEntries(term, leaderId, prevLogIndex, prevLogTerm, entries, commitIdx)
 					if remoteErr.Error() != "" {
 						// handle remote error: simply return and wait for the next heartbeat
 						return
@@ -71,9 +83,16 @@ func (rp *RaftPeer) run() {
 						rp.isCandidate = false
 						rp.votedFor = -1
 					}
+					if replyOK {
+						rp.nextIndex[idx] = prevLogIndex + len(entries) + 1
+						rp.matchIndex[idx] = rp.nextIndex[idx] - 1
+					} else {
+						rp.nextIndex[idx] = max(1, rp.nextIndex[idx]-1)
+					}
 					rp.mu.Unlock()
 				}(stub)
 			}
+			rp.commitIndex = rp.calculateCommitIndex()
 			rp.lastHeartbeatTime = now
 			rp.mu.Unlock()
 		} else if !rp.isLeader && now.Sub(rp.lastHeartbeatTime) >= rp.electionTimeout {
@@ -83,6 +102,17 @@ func (rp *RaftPeer) run() {
 			rp.mu.Unlock()
 		}
 	}
+}
+
+func (rp *RaftPeer) calculateCommitIndex() int {
+	matchIndexes := append([]int{len(rp.log) - 1}, rp.matchIndex...)
+	// sort matchIndexes in descending order
+	slices.Sort(matchIndexes)
+	N := matchIndexes[len(matchIndexes)/2]
+	if N > rp.commitIndex && rp.log[N].Term == rp.currentTerm {
+		return N
+	}
+	return rp.commitIndex
 }
 
 func (rp *RaftPeer) StartElection() {
@@ -177,7 +207,7 @@ func (rp *RaftPeer) isUpToDate(lastLogIndex int, lastLogTerm int) bool {
 	return lastLogIndex >= len(rp.log)-1
 }
 
-func (rp *RaftPeer) AppendEntries(term int, leaderId int, prevLogIndex int, prevLogTerm int, entries []int, leaderCommit int) (int, bool, remote.RemoteError) {
+func (rp *RaftPeer) AppendEntries(term int, leaderId int, prevLogIndex int, prevLogTerm int, entries []LogEntry, leaderCommit int) (int, bool, remote.RemoteError) {
 	rp.mu.Lock()
 	defer rp.mu.Unlock()
 
@@ -193,6 +223,27 @@ func (rp *RaftPeer) AppendEntries(term int, leaderId int, prevLogIndex int, prev
 
 	rp.isLeader = false
 	rp.isCandidate = false
+
+	logIndex := len(rp.log) - 1
+	if prevLogIndex > logIndex || (prevLogIndex >= 0 && rp.log[prevLogIndex].Term != prevLogTerm) {
+		return rp.currentTerm, false, remote.RemoteError{}
+	}
+
+	for i, entry := range entries {
+		index := prevLogIndex + 1 + i
+		if index < len(rp.log) {
+			if rp.log[index].Term != entry.Term {
+				rp.log = rp.log[:index]
+				rp.log = append(rp.log, LogEntry{Term: entry.Term, Command: entry.Command})
+			}
+		} else {
+			rp.log = append(rp.log, LogEntry{Term: entry.Term, Command: entry.Command})
+		}
+	}
+
+	if leaderCommit > rp.commitIndex {
+		rp.commitIndex = min(leaderCommit, len(rp.log)-1)
+	}
 	rp.resetElectionTimeout()
 
 	return rp.currentTerm, true, remote.RemoteError{}
