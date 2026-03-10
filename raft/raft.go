@@ -53,7 +53,6 @@ func (rp *RaftPeer) run() {
 		term := rp.currentTerm
 		leaderId := rp.id
 		rp.lastHeartBeatSentTime = now
-		rp.mu.Unlock()
 
 		if rp.isLeader && now.Sub(rp.lastHeartbeatTime) >= HeartbeatInterval {
 			// send heartbeats to followers
