@@ -157,6 +157,11 @@ func (rp *RaftPeer) StartElection() {
 					rp.isLeader = true
 					rp.isCandidate = false
 					rp.lastHeartBeatSentTime = time.Now()
+					rp.nextIndex = make([]int, rp.totalPeers-1)
+					for i := range rp.nextIndex {
+						rp.nextIndex[i] = len(rp.log)
+						rp.matchIndex[i] = 0
+					}
 				}
 			}
 			rp.mu.Unlock()
