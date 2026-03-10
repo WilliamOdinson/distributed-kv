@@ -414,7 +414,7 @@ func (rp *RaftPeer) GetStatus() (StatusReport, remote.RemoteError) {
 	callCount := rp.raftCalleeStub.GetCallCount()
 
 	return StatusReport{
-		Index:     0,
+		Index:     len(rp.log) - 1,
 		Term:      rp.currentTerm,
 		Leader:    rp.isLeader,
 		Active:    rp.isActivate,
