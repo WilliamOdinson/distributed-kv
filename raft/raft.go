@@ -296,8 +296,8 @@ func NewRaftPeer(peerInfo []RaftSetupInfo, index int) {
 		log:         make([]LogEntry, 0),
 		commitIndex: 0,
 		lastApplied: 0,
-		nextIndex:   make([]int, len(peerInfo)),
-		matchIndex:  make([]int, len(peerInfo)),
+		nextIndex:   make([]int, len(peerInfo)-1),
+		matchIndex:  make([]int, len(peerInfo)-1),
 
 		ch: make(chan struct{}),
 	}
