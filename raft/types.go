@@ -9,8 +9,8 @@ import (
 const (
 	PollInterval       = 15 * time.Millisecond  // how often run() checks for timeouts
 	HeartbeatInterval  = 100 * time.Millisecond // leader sends heartbeats this often
-	ElectionTimeoutMin = 150                    // minimum election timeout in ms
-	ElectionTimeoutMax = 300                    // maximum election timeout in ms
+	ElectionTimeoutMin = 300                    // minimum election timeout in ms
+	ElectionTimeoutMax = 500                    // maximum election timeout in ms
 )
 
 // Controller sends to Raft peer at creation time. DO NOT CHANGE.
