@@ -332,6 +332,7 @@ func (rp *RaftPeer) Activate() remote.RemoteError {
 	defer rp.mu.Unlock()
 
 	rp.isActivate = true
+	rp.resetElectionTimeout()
 	rp.raftCalleeStub.Start()
 
 	return remote.RemoteError{}
