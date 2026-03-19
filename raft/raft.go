@@ -1,11 +1,10 @@
 package raft
 
 import (
+	"log"
 	"math/rand"
 	"remote"
 	"slices"
-	"sync"
-	"sync/atomic"
 	"time"
 )
 
@@ -74,6 +73,7 @@ func (rp *RaftPeer) run() {
 		} else if !rp.isLeader && now.Sub(rp.lastHeartbeatTime) >= rp.electionTimeout {
 			rp.mu.Unlock()
 			rp.StartElection()
+			log.Println("\t", "Peer", rp.id, "\t", "starts election for term", rp.currentTerm)
 		} else {
 			rp.mu.Unlock()
 		}
@@ -128,15 +128,13 @@ func (rp *RaftPeer) StartElection() {
 	}
 	rp.mu.Unlock()
 
-	var votesReceived int64 = 1 // vote for self
-	var wg sync.WaitGroup
-
+	votesReceived := 1
+	var voteCh = make(chan bool, len(rp.peerStubs))
 	for _, stub := range rp.peerStubs {
-		wg.Add(1)
 		go func(stub *RaftInterface) {
-			defer wg.Done()
 			replyTerm, voteGranted, remoteErr := stub.RequestVote(term, leaderId, lastLogIndex, lastLogTerm)
 			if remoteErr.Error() != "" {
+				voteCh <- false
 				// handle remote error: simply return and wait for the next election timeout
 				return
 			}
@@ -147,23 +145,30 @@ func (rp *RaftPeer) StartElection() {
 				rp.isLeader = false
 				rp.isCandidate = false
 				rp.votedFor = -1
+				voteCh <- false
 			} else if voteGranted {
-				atomic.AddInt64(&votesReceived, 1)
-				if int(votesReceived) >= (rp.totalPeers+1)/2 {
-					// become leader
-					rp.isLeader = true
-					rp.isCandidate = false
-					rp.nextIndex = make([]int, rp.totalPeers-1)
-					for i := range rp.nextIndex {
-						rp.nextIndex[i] = len(rp.log)
-						rp.matchIndex[i] = 0
-					}
-				}
+				voteCh <- true
 			}
 			rp.mu.Unlock()
 		}(stub)
 	}
-	wg.Wait()
+
+	for i := 0; i < rp.totalPeers-1 && votesReceived < (rp.totalPeers+1)/2; i++ {
+		if <-voteCh {
+			votesReceived++
+		}
+	}
+	if rp.isCandidate && rp.currentTerm == term && votesReceived >= (rp.totalPeers+1)/2 {
+		// become leader
+		rp.isLeader = true
+		rp.isCandidate = false
+		rp.nextIndex = make([]int, rp.totalPeers-1)
+		for i := range rp.nextIndex {
+			rp.nextIndex[i] = len(rp.log)
+			rp.matchIndex[i] = 0
+		}
+		rp.lastHeartbeatTime = time.Time{}
+	}
 }
 
 // resetElectionTimeout is a helper function that picks a new random election timeout
