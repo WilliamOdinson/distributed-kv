@@ -124,7 +124,12 @@ func (rp *RaftPeer) StartElection() {
 		wg.Add(1)
 		go func(stub *RaftInterface) {
 			defer wg.Done()
-			replyTerm, voteGranted, remoteErr := stub.RequestVote(term, leaderId, 0, 0)
+			lastLogIndex := len(rp.log) - 1
+			lastLogTerm := 0
+			if lastLogIndex >= 0 {
+				lastLogTerm = rp.log[lastLogIndex].Term
+			}
+			replyTerm, voteGranted, remoteErr := stub.RequestVote(term, leaderId, lastLogIndex, lastLogTerm)
 			if remoteErr.Error() != "" {
 				// handle remote error: simply return and wait for the next election timeout
 				return
