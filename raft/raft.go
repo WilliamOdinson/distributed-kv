@@ -29,7 +29,6 @@ func (rp *RaftPeer) run() {
 
 		term := rp.currentTerm
 		leaderId := rp.id
-		rp.lastHeartBeatSentTime = now
 
 		if rp.isLeader && now.Sub(rp.lastHeartbeatTime) >= HeartbeatInterval {
 			// send heartbeats to followers
@@ -143,7 +142,6 @@ func (rp *RaftPeer) StartElection() {
 					// become leader
 					rp.isLeader = true
 					rp.isCandidate = false
-					rp.lastHeartBeatSentTime = time.Now()
 					rp.nextIndex = make([]int, rp.totalPeers-1)
 					for i := range rp.nextIndex {
 						rp.nextIndex[i] = len(rp.log)
