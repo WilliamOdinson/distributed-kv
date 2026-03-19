@@ -393,7 +393,7 @@ func (rp *RaftPeer) GetCommittedCmd(index int) ([]byte, remote.RemoteError) {
 	rp.mu.Lock()
 	defer rp.mu.Unlock()
 
-	if index < len(rp.log) && index <= rp.commitIndex {
+	if index >= 0 && index < len(rp.log) && index <= rp.commitIndex {
 		return rp.log[index].Command, remote.RemoteError{}
 	}
 
