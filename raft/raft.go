@@ -1,31 +1,5 @@
 package raft
 
-// Raft implementation
-//
-// general notes:
-//
-// - you are welcome to use additional helper functions to handle aspects of the Raft algorithm
-//   logic within the scope of a single Raft peer. you should not need to create any additional
-//   remote calls between Raft peers or the Controller. if there is a desire to create additional
-//   remote calls, please talk with the course staff before doing so.
-//
-// - Raft peers are not able to share information with each other or with the Controller in any
-//   way other than through remote calls, allowing peers the potential to operate on physically
-//   distinct machines
-//
-// - please make sure to read the Raft paper (https://raft.github.io/raft.pdf) before attempting
-//   any coding for this lab. you will most likely need to refer to it many times during your
-//   implementation and testing tasks, so please consult the paper for algorithm details.
-//
-// - each Raft peer will accept a lot of concurrent remote calls from other Raft peers and the
-//   Controller, so use of concurrency controls is essential. you are expected to use such
-//   controls to prevent race conditions in your implementation. the Makefile supports testing
-//   both without and with go's race condition detector, and the testing system will enable the
-//   race condition detector, which will cause tests to fail if any race conditions are
-//   encountered.
-//
-// - don't forget to ask for help!
-
 import (
 	"math/rand"
 	"remote"
@@ -35,8 +9,10 @@ import (
 	"time"
 )
 
-const ()
-
+// run is the main event loop for the Raft peer, started as a goroutine by NewRaftPeer.
+// It periodically checks whether the peer should send heartbeats (if leader) or start
+// an election (if follower/candidate and election timeout has elapsed). All shared state
+// access is protected by rp's mutex. The loop exits when the peer is terminated.
 func (rp *RaftPeer) run() {
 	for {
 		time.Sleep(PollInterval)
@@ -105,6 +81,10 @@ func (rp *RaftPeer) run() {
 	}
 }
 
+// calculateCommitIndex determines the highest log index N that a majority of peers
+// have replicated, per Raft paper §5.3. It first collects all matchIndex values and
+// plus the leader's own last log index, sorts them, and picks the median.
+// N is only adopted if the entry at N belongs to the current term.
 func (rp *RaftPeer) calculateCommitIndex() int {
 	matchIndexes := append([]int{len(rp.log) - 1}, rp.matchIndex...)
 	// sort matchIndexes in descending order
@@ -116,6 +96,12 @@ func (rp *RaftPeer) calculateCommitIndex() int {
 	return rp.commitIndex
 }
 
+// StartElection starts a new election for the peer as described in §5.2 of the Raft paper.
+// It first transitions this peer to candidate state, increments the current term, votes for itself, and sends RequestVote RPCs to all other existing peers.
+//
+// If:
+//   - a majority of votes is received, the peer becomes leader.
+//   - a higher term is discovered, the peer steps down to follower.
 func (rp *RaftPeer) StartElection() {
 	rp.mu.Lock()
 
@@ -171,6 +157,9 @@ func (rp *RaftPeer) StartElection() {
 	wg.Wait()
 }
 
+// resetElectionTimeout is a helper function that picks a new random election timeout
+// and resets the heartbeat timer.
+// The timeout is a random value [ElectionTimeoutMin, ElectionTimeoutMax)
 func (rp *RaftPeer) resetElectionTimeout() {
 	seed := rand.Intn(ElectionTimeoutMax-ElectionTimeoutMin) + ElectionTimeoutMin
 
@@ -178,6 +167,14 @@ func (rp *RaftPeer) resetElectionTimeout() {
 	rp.lastHeartbeatTime = time.Now()
 }
 
+// RequestVote handles an RequestVote RPC from a candidate as described in §5.2 of the Raft paper.
+// It grants a vote if:
+//   - this peer has not already voted for a different candidate in the same term
+//   - the candidate's term is at least as large as (>=) this peer's current term
+//   - the candidate's log is at least as up-to-date as (>=) this peer's log
+//
+// If the vote is granted, this peer's election timeout is reset.
+// If the peer reject the vote for any upper conditions unmet, it returns its current term to the candidate for him to step down.
 func (rp *RaftPeer) RequestVote(term int, candidateId int, lastLogIndex int, lastLogTerm int) (int, bool, remote.RemoteError) {
 	rp.mu.Lock()
 	defer rp.mu.Unlock()
@@ -202,6 +199,8 @@ func (rp *RaftPeer) RequestVote(term int, candidateId int, lastLogIndex int, las
 	return rp.currentTerm, false, remote.RemoteError{}
 }
 
+// isUpToDate checks whether a candidate's log is at least as up-to-date as this peer's
+// log, per the election restriction in Raft paper §5.4.
 func (rp *RaftPeer) isUpToDate(lastLogIndex int, lastLogTerm int) bool {
 	if len(rp.log) == 0 {
 		return true
@@ -213,6 +212,12 @@ func (rp *RaftPeer) isUpToDate(lastLogIndex int, lastLogTerm int) bool {
 	return lastLogIndex >= len(rp.log)-1
 }
 
+// AppendEntries handles an incoming AppendEntries RPC from the leader, implements Raft paper §5.3.
+// The RPC performs two different functions:
+//   - heartbeat: if entries is empty, the RPC is a heartbeat to maintain the leader's authority.
+//   - log replication: if entries is non-empty, the RPC replicates log entries from the leader.
+//     if the leader's log is inconsistent with this peer's log, the RPC should delete any
+//     conflicting entries and append the new entries from the leader.
 func (rp *RaftPeer) AppendEntries(term int, leaderId int, prevLogIndex int, prevLogTerm int, entries []LogEntry, leaderCommit int) (int, bool, remote.RemoteError) {
 	rp.mu.Lock()
 	defer rp.mu.Unlock()
@@ -255,34 +260,14 @@ func (rp *RaftPeer) AppendEntries(term int, leaderId int, prevLogIndex int, prev
 	return rp.currentTerm, true, remote.RemoteError{}
 }
 
-// TODO: you will need to define a struct that contains the parameters/variables that define
-// and explain the current status of each Raft peer. it doesn't matter what you call this
-// struct, and the test code doesn't really care what state it contains, so this part is up
-// to you.
-
-// the Controller calls NewRaftPeer in its own go routine to spawn a new Raft peer. the
-// arguments contain everything needed for the new Raft peer to determine its own identity and
-// callee addresses as well as the relevant callee address of all other Raft peers. examples
-// of the RaftSetupInfo are provided in the lab description on canvas. the index parameter
-// indicates the index in the slice of RaftSetupInfo structs corresponding to this new Raft
-// peer, and the remaining info is for other peers.
+// NewRaftPeer creates and initialize a Raft peer. The function will:
+//   - initialize the Raft peer's state based on the provided peerInfo and index
+//   - create the Callee stub for the ControlInterface and start it
+//   - create the Callee stub for the RaftInterface
+//   - create Caller stubs for all other Raft peers (len(peerInfo)-1) in the group
 //
-// TODO: spawn a new raft peer (called in its own go routine by the Controller)
+// After initialization, the peer starts run() as a goroutine for the main loop.
 func NewRaftPeer(peerInfo []RaftSetupInfo, index int) {
-
-	// when a new raft peer is created, its initial state should be populated into the
-	// corresponding struct entries, it should create two Callee stubs and N-1 Caller stubs,
-	// where N is the Raft group size. the Callee stub for the ControlInterface must be
-	// started immediately, so the Raft peer can accept commands from the Controller, but
-	// the Callee stub for the RemoteInterface should not be started until the Controller
-	// issues the remote call telling the peer to start.
-	//
-	// the CalleeStubs using the RemoteInterface and ControlInterface should bind to the
-	// addresses in the Addr and Caddr entry in peerInfo[index], respectively. each caller
-	// stub created using remote.CallerStubCreator should be used to send Raft algorithm
-	// commands to a different Raft peer in the group. the addresses provided by the
-	// Controller are guaranteed to be unique (i.e., no peers will have the same ID or use
-	// the same address).
 	rp := &RaftPeer{
 		id:           peerInfo[index].Id,
 		totalPeers:   len(peerInfo),
@@ -332,17 +317,7 @@ func NewRaftPeer(peerInfo []RaftSetupInfo, index int) {
 
 //// method implementations for the ControlInterface
 
-// * Activate -- this remote method is used exclusively by the Controller whenever it needs
-// to start the underlying server in the Raft peer and allow it to receive calls from other
-// Raft peers. this is used to emulate connecting a new peer to the network or recovery of a
-// previously failed peer. when this method is called, the Raft peer should do whatever is
-// necessary to enable its remote.CallerStub interface to support remote calls from other Raft
-// peers as soon as the method returns (i.e., if it takes time for the remote.CallerStub to
-// start, this method should not return until that happens). the method should not otherwise
-// block the Controller.
-//
-// TODO: implement the Activate remote method
-
+// Activate starts the RaftInterface so that to allow this peer to make or receive RPC calls.
 func (rp *RaftPeer) Activate() remote.RemoteError {
 	rp.mu.Lock()
 	defer rp.mu.Unlock()
@@ -353,18 +328,7 @@ func (rp *RaftPeer) Activate() remote.RemoteError {
 	return remote.RemoteError{}
 }
 
-// * Deactivate -- this remote method performs the "inverse" operation to Activate, namely to
-// stop the underlying server in the Raft peer to emulate disconnection / failure of the Raft
-// peer. when called, the Raft peer should disable only the stub serving the RaftInterface,
-// causing any remote calls to this Raft peer to fail due to connection error. when
-// deactivated, a Raft peer should not make or receive any remote calls on the stub using the
-// RaftInterface, and any execution of the Raft protocol should effectively pause. however,
-// local state should be maintained and the stub using the ControlInterface should continue to
-// operate without disruption. if a Raft node was the leader when it was deactivated, it
-// should still believe it is the leader when it reactivates.
-//
-// TODO: implement the Deactivate remote method
-
+// Deactivate stops the RaftInterface so that to emulate disconnection/failure of the Raft peer.
 func (rp *RaftPeer) Deactivate() remote.RemoteError {
 	rp.mu.Lock()
 	defer rp.mu.Unlock()
@@ -375,13 +339,7 @@ func (rp *RaftPeer) Deactivate() remote.RemoteError {
 	return remote.RemoteError{}
 }
 
-// * Terminate -- this remote method is used exclusively by the Controller to permanently
-// cease operation of the Raft peer. this is called at the end of each test when the Raft peer
-// is no longer needed, and it allows the Raft peer to completely terminate all services and
-// delete all relevant state.
-//
-// TODO: implement the Terminate remote method
-
+// Terminate permanently shuts down this Raft peer and clear the states.
 func (rp *RaftPeer) Terminate() remote.RemoteError {
 	rp.mu.Lock()
 	defer rp.mu.Unlock()
@@ -399,14 +357,12 @@ func (rp *RaftPeer) Terminate() remote.RemoteError {
 	return remote.RemoteError{}
 }
 
-// * GetStatus -- this remote method is used exclusively by the Controller. this method takes
-// no arguments and is essentially a "getter" for the state of the Raft peer, including the
-// Raft peer's current term, current last log index, role in the Raft algorithm,
-// active/non-active state, and total number of remote calls handled since starting. the
-// method returns a StatusReport as defined above.
-//
-// TODO: implement the GetStatus remote method
-
+// GetStatus returns a StatusReport, including the peer's:
+//   - the last log index
+//   - the current term
+//   - whether the peer is the leader
+//   - whether it is still alive, not terminated
+//   - the total number of RPCs calls
 func (rp *RaftPeer) GetStatus() (StatusReport, remote.RemoteError) {
 	rp.mu.Lock()
 	defer rp.mu.Unlock()
@@ -422,14 +378,8 @@ func (rp *RaftPeer) GetStatus() (StatusReport, remote.RemoteError) {
 	}, remote.RemoteError{}
 }
 
-// * GetCommittedCmd -- this remote method is used exclusively by the Controller. this method
-// provides an input argument `index`. if the Raft peer has a log entry at the given `index`,
-// and that log entry has been committed (per the Raft algorithm), then the command stored in
-// the log entry should be returned to the Controller. otherwise, the Raft peer should return
-// the nil value of the command type to indicate that no committed log entry exists at that
-// index.
-//
-// TODO: implement the GetCommittedCmd remote method
+// GetCommittedCmd returns the command at the given log index if the entry exists and
+// has been committed. Returns nil if no committed entry exists at that index.
 func (rp *RaftPeer) GetCommittedCmd(index int) ([]byte, remote.RemoteError) {
 	rp.mu.Lock()
 	defer rp.mu.Unlock()
@@ -441,15 +391,8 @@ func (rp *RaftPeer) GetCommittedCmd(index int) ([]byte, remote.RemoteError) {
 	return nil, remote.RemoteError{}
 }
 
-// * NewCommand -- this remote method is used exclusively by the Controller. this method
-// emulates submission of a new command by a Raft client to this Raft peer, which should be
-// handled and processed according to the rules of the Raft algorithm. in particular, the Raft
-// peer should accept the command only if it is currently active and believes it is the leader.
-// regardless of whether the command is accepted and processed, the Raft peer should return a
-// StatusReport reflecting the status of the Raft peer after the new command message was
-// received.
-//
-// TODO: implement the NewCommand remote method
+// NewCommand accepts a client command from outside the raft cluster.
+// The command rules that are ONLY accepted by the leader of the raft cluster.
 func (rp *RaftPeer) NewCommand(command []byte) (StatusReport, remote.RemoteError) {
 	rp.mu.Lock()
 	defer rp.mu.Unlock()
@@ -479,15 +422,3 @@ func (rp *RaftPeer) NewCommand(command []byte) (StatusReport, remote.RemoteError
 		CallCount: 0,
 	}, remote.RemoteError{}
 }
-
-//// method implementations for the RaftInterface
-
-// * RequestVote -- this remote method is called (only) by other Raft peers and should operate
-// according to the description in the Raft paper.
-//
-// TODO: implement the RequestVote remote method (which you can name/structure as desired)
-
-// * AppendEntries -- this remote method is called (only) by other Raft peers and should
-// operate according to the description in the Raft paper.
-//
-// TODO: implement the AppendEntries remote method (which you can name/structure as desired)
