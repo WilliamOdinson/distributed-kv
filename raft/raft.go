@@ -85,11 +85,17 @@ func (rp *RaftPeer) run() {
 // plus the leader's own last log index, sorts them, and picks the median.
 // N is only adopted if the entry at N belongs to the current term.
 func (rp *RaftPeer) calculateCommitIndex() int {
-	matchIndexes := append([]int{len(rp.log) - 1}, rp.matchIndex...)
-	// sort matchIndexes in descending order
+	if len(rp.log) == 0 {
+		return rp.commitIndex
+	}
+	matchIndexes := make([]int, len(rp.matchIndex)+1)
+	matchIndexes[0] = len(rp.log) - 1
+	copy(matchIndexes[1:], rp.matchIndex)
 	slices.Sort(matchIndexes)
 	N := matchIndexes[len(matchIndexes)/2]
-	if N > rp.commitIndex && rp.log[N].Term == rp.currentTerm {
+
+	// only update commitIndex if the entry at N is from current term
+	if N > rp.commitIndex && N >= 0 && N < len(rp.log) && rp.log[N].Term == rp.currentTerm {
 		return N
 	}
 	return rp.commitIndex
