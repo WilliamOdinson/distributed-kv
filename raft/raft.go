@@ -148,6 +148,8 @@ func (rp *RaftPeer) StartElection() {
 				voteCh <- false
 			} else if voteGranted {
 				voteCh <- true
+			} else {
+				voteCh <- false
 			}
 			rp.mu.Unlock()
 		}(stub)
