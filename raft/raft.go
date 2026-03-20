@@ -1,7 +1,6 @@
 package raft
 
 import (
-	"log"
 	"math/rand"
 	"remote"
 	"slices"
@@ -73,7 +72,6 @@ func (rp *RaftPeer) run() {
 		} else if !rp.isLeader && now.Sub(rp.lastHeartbeatTime) >= rp.electionTimeout {
 			rp.mu.Unlock()
 			rp.StartElection()
-			log.Println("\t", "Peer", rp.id, "\t", "starts election for term", rp.currentTerm)
 		} else {
 			rp.mu.Unlock()
 		}
@@ -255,6 +253,7 @@ func (rp *RaftPeer) AppendEntries(term int, leaderId int, prevLogIndex int, prev
 
 	rp.isLeader = false
 	rp.isCandidate = false
+	rp.resetElectionTimeout()
 
 	logIndex := len(rp.log) - 1
 	if prevLogIndex > logIndex || (prevLogIndex >= 0 && rp.log[prevLogIndex].Term != prevLogTerm) {
@@ -276,7 +275,6 @@ func (rp *RaftPeer) AppendEntries(term int, leaderId int, prevLogIndex int, prev
 	if leaderCommit > rp.commitIndex {
 		rp.commitIndex = min(leaderCommit, len(rp.log)-1)
 	}
-	rp.resetElectionTimeout()
 
 	return rp.currentTerm, true, remote.RemoteError{}
 }
