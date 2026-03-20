@@ -145,13 +145,15 @@ func (rp *RaftPeer) StartElection() {
 				rp.isLeader = false
 				rp.isCandidate = false
 				rp.votedFor = -1
+				rp.mu.Unlock()
 				voteCh <- false
 			} else if voteGranted {
+				rp.mu.Unlock()
 				voteCh <- true
 			} else {
+				rp.mu.Unlock()
 				voteCh <- false
 			}
-			rp.mu.Unlock()
 		}(stub)
 	}
 
