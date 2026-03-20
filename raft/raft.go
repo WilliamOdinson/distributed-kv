@@ -160,6 +160,8 @@ func (rp *RaftPeer) StartElection() {
 			votesReceived++
 		}
 	}
+
+	rp.mu.Lock()
 	if rp.isCandidate && rp.currentTerm == term && votesReceived >= (rp.totalPeers+1)/2 {
 		// become leader
 		rp.isLeader = true
@@ -171,6 +173,7 @@ func (rp *RaftPeer) StartElection() {
 		}
 		rp.lastHeartbeatTime = time.Time{}
 	}
+	rp.mu.Unlock()
 }
 
 // resetElectionTimeout is a helper function that picks a new random election timeout
