@@ -297,7 +297,7 @@ func NewRaftPeer(peerInfo []RaftSetupInfo, index int) {
 
 		currentTerm: 0,
 		votedFor:    -1,
-		log:         make([]LogEntry, 0),
+		log:         make([]LogEntry, 1), // log index starts at 1, so we must add a dummy entry at index 0
 		commitIndex: 0,
 		lastApplied: 0,
 		nextIndex:   make([]int, len(peerInfo)-1),
