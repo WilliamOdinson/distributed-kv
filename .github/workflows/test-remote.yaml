@@ -1,0 +1,22 @@
+name: Test Remote
+
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - "remote/**"
+  pull_request:
+    branches: ["main"]
+    paths:
+      - "remote/**"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.26"
+      - run: go test -v -timeout 120s -race ./...
+        working-directory: remote
