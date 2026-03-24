@@ -52,7 +52,6 @@ package remote
 
 import (
 	"errors"
-	"io"
 	"math/rand"
 	"net"
 	"time"
@@ -129,9 +128,7 @@ func (ls *LeakySocket) Recv() ([]byte, error) {
 				return buf[:n], nil
 			}
 			if err != nil {
-				if err != io.EOF {
-					return nil, errors.New("Recv Read error: " + err.Error())
-				}
+				return nil, errors.New("Recv Read error: " + err.Error())
 			}
 		}
 	}
