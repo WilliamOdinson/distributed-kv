@@ -56,13 +56,15 @@ func (rp *RaftPeer) run() {
 						rp.isLeader = false
 						rp.isCandidate = false
 						rp.votedFor = -1
-					}
-					if replyOK {
-						rp.nextIndex[idx] = prevLogIndex + len(entries) + 1
-						rp.matchIndex[idx] = rp.nextIndex[idx] - 1
-						rp.commitIndex = rp.calculateCommitIndex()
-					} else {
-						rp.nextIndex[idx] = max(1, rp.nextIndex[idx]-1)
+					} else if rp.isLeader && rp.currentTerm == term {
+						// only update replication state if still leader in the same term
+						if replyOK {
+							rp.nextIndex[idx] = prevLogIndex + len(entries) + 1
+							rp.matchIndex[idx] = rp.nextIndex[idx] - 1
+							rp.commitIndex = rp.calculateCommitIndex()
+						} else {
+							rp.nextIndex[idx] = max(1, rp.nextIndex[idx]-1)
+						}
 					}
 					rp.mu.Unlock()
 				}(stub)
