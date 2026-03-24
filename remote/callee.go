@@ -234,7 +234,8 @@ func (cs *CalleeStub) handleConnection(conn net.Conn) {
 	}
 	sent, err := socket.Send(replyBuf.Bytes())
 	if err != nil {
-		cs.sendErrorMessage(conn, fmt.Sprintf("[Callee] failed to send reply message: %v", err))
+		// conn already broken, actually this will also fail.
+		// cs.sendErrorMessage(conn, fmt.Sprintf("[Callee] failed to send reply message: %v", err))
 		return
 	}
 	if sent {
