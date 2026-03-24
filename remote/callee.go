@@ -286,7 +286,8 @@ func (cs *CalleeStub) sendErrorMessage(conn net.Conn, errMsg string) error {
 		return fmt.Errorf("failed to encode reply message: %w", err)
 	}
 
-	_, err := conn.Write(replyBuf.Bytes())
+	socket := NewLeakySocket(conn, cs.isLossy, cs.isDelayed)
+	_, err := socket.Send(replyBuf.Bytes())
 	if err != nil {
 		return fmt.Errorf("failed to send reply message: %w", err)
 	}
