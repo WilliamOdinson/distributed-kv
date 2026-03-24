@@ -232,13 +232,15 @@ func (cs *CalleeStub) handleConnection(conn net.Conn) {
 		cs.sendErrorMessage(conn, fmt.Sprintf("[Callee] failed to encode reply message: %v", err))
 		return
 	}
-	if _, err := socket.Send(replyBuf.Bytes()); err != nil {
+	sent, err := socket.Send(replyBuf.Bytes())
+	if err != nil {
 		cs.sendErrorMessage(conn, fmt.Sprintf("[Callee] failed to send reply message: %v", err))
 		return
 	}
-
-	// at the end of handling this connection, we have successfully handled one call, so increase call count by 1
-	atomic.AddInt64(&cs.callCount, 1)
+	if sent {
+		// at the end of handling this connection, we have successfully handled one call, so increase call count by 1
+		atomic.AddInt64(&cs.callCount, 1)
+	}
 }
 
 // Stop gracefully shuts down the TCP server for Callee.
