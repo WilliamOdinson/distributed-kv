@@ -122,8 +122,21 @@ func NewHKVCParticipant(pInfo []HKVCSetupInfo, index int, groups map[int][]int) 
 // to start the Raft peer and client interface contained within an HKVC participant, allowing it to
 // interact with other participants and external clients, respectively.  the purpose of this method
 // is similar to the method of the same name from the previous lab.
-//
-// TODO: implement the Activate remote method
+func (p *HKVCParticipant) Activate() remote.RemoteError {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if p.isTerminated || p.isActive {
+		return remote.RemoteError{}
+	}
+	p.isActive = true
+
+	for _, rp := range p.raftPeers {
+		rp.Activate()
+	}
+
+	return remote.RemoteError{}
+}
 
 // * Deactivate -- this remote method performs the "inverse" operation to Activate, namely to stop
 // the Raft peer and client interface contained within the HKVC participant and pausing its interaction
@@ -131,11 +144,44 @@ func NewHKVCParticipant(pInfo []HKVCSetupInfo, index int, groups map[int][]int) 
 // of the same name from the previous lab.
 //
 // TODO: implement the Deactivate remote method
+func (p *HKVCParticipant) Deactivate() remote.RemoteError {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if p.isTerminated || !p.isActive {
+		return remote.RemoteError{}
+	}
+	p.isActive = false
+
+	for _, rp := range p.raftPeers {
+		rp.Deactivate()
+	}
+
+	return remote.RemoteError{}
+}
 
 // * Terminate -- this remote method is used exclusively by the HKVCController to permanently cease operation
 // of the HKVC participant, similar to the method of the same name in the previous lab.
 //
 // TODO: implement the Terminate remote method
+func (p *HKVCParticipant) Terminate() remote.RemoteError {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if p.isTerminated {
+		return remote.RemoteError{}
+	}
+	p.isTerminated = true
+	p.isActive = false
+
+	for _, rp := range p.raftPeers {
+		rp.Terminate()
+	}
+
+	p.controlCallee.Stop()
+
+	return remote.RemoteError{}
+}
 
 // * GetStatus -- this remote method is used exclusively by the HKVCController to get the activation status and
 // list of Raft roles for all of the Raft groups that this HKVC participant is in.  the method returns a
