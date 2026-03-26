@@ -86,6 +86,25 @@ func NewHKVCParticipant(pInfo []HKVCSetupInfo, index int, groups map[int][]int) 
 	p.mux.HandleFunc("/create", p.handleCreate)
 	p.mux.HandleFunc("/delete", p.handleDelete)
 
+	for gid, pids := range groups {
+		found := false
+		for _, pid := range pids {
+			if pid == index {
+				found = true
+				break
+			}
+		}
+		if !found {
+			continue
+		}
+		var peerAddrs []string
+		for _, pid := range pids {
+			if pid != index {
+				peerAddrs = append(peerAddrs, pInfo[pid].RaftAddrs[gid])
+			}
+		}
+		p.raftPeers[gid] = raft.NewHKVCRaftPeer(pInfo[index].Id, pInfo[index].RaftAddrs[gid], peerAddrs)
+	}
 	// * populate initial state
 	// * create all needed Callee and Caller stubs for internal communication
 	// * create client interface for external communication
