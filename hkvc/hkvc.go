@@ -1,5 +1,10 @@
 package hkvc
 
+import (
+	"net/http"
+	"raft"
+)
+
 // Hierarchical Key-Value Cluster (HKVC)
 //
 // General notes:
@@ -54,11 +59,32 @@ package hkvc
 
 // TODO: define a struct for the HKVC participant state.
 
-// The HKVCController calls NewHKVCParticipant in its own go routine, containing everything needed for the
-// new HKVC participant to configure and launch itself.
-//
-// TODO: spawn a new HKVC participant (called in its own go routine by the HKVCController)
+// The HKVCController calls NewHKVCParticipant in its own go routine, containing everything
+// needed for the new HKVC participant to configure and launch itself.
 func NewHKVCParticipant(pInfo []HKVCSetupInfo, index int, groups map[int][]int) {
+
+	p := &HKVCParticipant{
+		uid:          pInfo[index].Id,
+		isActive:     false,
+		isTerminated: false,
+
+		root: &directory{
+			name:    "/",
+			subDirs: make(map[string]*directory),
+			kvPairs: make(map[string]*kvPair),
+		},
+
+		mux: http.NewServeMux(),
+
+		raftPeers: make(map[int]*raft.RaftPeer),
+	}
+
+	p.mux.HandleFunc("/list", p.handleList)
+	p.mux.HandleFunc("/get_metadata", p.handleGetMetadata)
+	p.mux.HandleFunc("/get", p.handleGet)
+	p.mux.HandleFunc("/set", p.handleSet)
+	p.mux.HandleFunc("/create", p.handleCreate)
+	p.mux.HandleFunc("/delete", p.handleDelete)
 
 	// * populate initial state
 	// * create all needed Callee and Caller stubs for internal communication

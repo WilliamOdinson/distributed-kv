@@ -1,6 +1,12 @@
 package hkvc
 
-import "remote"
+import (
+	"net"
+	"net/http"
+	"raft"
+	"remote"
+	"sync"
+)
 
 // constants representing different ErrorType values
 const (
@@ -105,4 +111,31 @@ type HKVCControlInterface struct {
 	Deactivate func() remote.RemoteError
 	Terminate  func() remote.RemoteError
 	GetStatus  func() (HKVCStatusReport, remote.RemoteError)
+}
+
+type HKVCParticipant struct {
+	uid           int           // unique ID of the cluster participant
+	mu            sync.Mutex    // mutex to protect shared state of the participant
+	isActive      bool          // indicator of active/inactive status
+	isTerminated  bool          // indicator of whether the participant has been terminated
+	controlCallee remote.Callee // remote calleestub for the control interface
+
+	listener net.Listener   // http listener for the participant's client interface
+	mux      *http.ServeMux // http mux for the participant's client interface
+
+	root *directory // root directory of the participant's key-value store
+
+	raftPeers map[int]*raft.RaftPeer // map of groupID to RaftPeer for the participant's raft interface specific to Raft group with ID groupID
+}
+
+type directory struct {
+	name    string
+	subDirs map[string]*directory
+	kvPairs map[string]*kvPair
+}
+
+type kvPair struct {
+	key     string
+	value   string
+	version int
 }
