@@ -3,6 +3,7 @@ package hkvc
 import (
 	"net/http"
 	"raft"
+	"remote"
 )
 
 // Hierarchical Key-Value Cluster (HKVC)
@@ -105,11 +106,14 @@ func NewHKVCParticipant(pInfo []HKVCSetupInfo, index int, groups map[int][]int) 
 		}
 		p.raftPeers[gid] = raft.NewHKVCRaftPeer(pInfo[index].Id, pInfo[index].RaftAddrs[gid], peerAddrs)
 	}
-	// * populate initial state
-	// * create all needed Callee and Caller stubs for internal communication
-	// * create client interface for external communication
-	// * start stub for HKVCControlInterface immediately, wait on others
 
+	ctrlIfc := &HKVCControlInterface{}
+	ctrlStub, err := remote.NewCalleeStub(ctrlIfc, p, pInfo[index].ControlAddr, false, false)
+	if err != nil {
+		panic(err)
+	}
+	p.controlCallee = ctrlStub
+	ctrlStub.Start()
 }
 
 //// method implementations for the HKVCControlInterface
