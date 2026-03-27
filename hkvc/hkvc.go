@@ -1,6 +1,7 @@
 package hkvc
 
 import (
+	"net"
 	"net/http"
 	"raft"
 	"remote"
@@ -131,6 +132,13 @@ func (p *HKVCParticipant) Activate() remote.RemoteError {
 	}
 	p.isActive = true
 
+	ln, err := net.Listen("tcp", p.ClientAddr)
+	if err != nil {
+		return remote.RemoteError{}
+	}
+	p.listener = ln
+	go http.Serve(ln, p.mux)
+
 	for _, rp := range p.raftPeers {
 		rp.Activate()
 	}
@@ -152,6 +160,11 @@ func (p *HKVCParticipant) Deactivate() remote.RemoteError {
 		return remote.RemoteError{}
 	}
 	p.isActive = false
+
+	if p.listener != nil {
+		p.listener.Close()
+		p.listener = nil
+	}
 
 	for _, rp := range p.raftPeers {
 		rp.Deactivate()

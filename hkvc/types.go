@@ -120,8 +120,9 @@ type HKVCParticipant struct {
 	isTerminated  bool          // indicator of whether the participant has been terminated
 	controlCallee remote.Callee // remote calleestub for the control interface
 
-	listener net.Listener   // http listener for the participant's client interface
-	mux      *http.ServeMux // http mux for the participant's client interface
+	listener   net.Listener   // http listener for the participant's client interface
+	mux        *http.ServeMux // http mux for the participant's client interface
+	ClientAddr string         // ip:port address for the participant's client interface
 
 	root *directory // root directory of the participant's key-value store
 
