@@ -22,11 +22,12 @@ type RaftSetupInfo struct {
 
 // Raft peer must send to Controller on request. DO NOT CHANGE.
 type StatusReport struct {
-	Index     int
-	Term      int
-	Leader    bool
-	Active    bool
-	CallCount int
+	Index       int
+	CommitIndex int
+	Term        int
+	Leader      bool
+	Active      bool
+	CallCount   int
 }
 
 // LogEntry represents a single entry in the Raft log, containing the term
