@@ -138,5 +138,5 @@ type directory struct {
 type kvPair struct {
 	key     string
 	value   string
-	version int
+	version uint64
 }
