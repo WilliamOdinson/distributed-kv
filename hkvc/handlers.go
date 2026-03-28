@@ -1,6 +1,15 @@
 package hkvc
 
-import "net/http"
+import (
+	"encoding/json"
+	"net/http"
+)
+
+func sendJSONResponse(w http.ResponseWriter, code int, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(code)
+	json.NewEncoder(w).Encode(v)
+}
 
 func (p *HKVCParticipant) handleList(w http.ResponseWriter, r *http.Request) {
 
