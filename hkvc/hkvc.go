@@ -201,3 +201,22 @@ func (p *HKVCParticipant) Terminate() remote.RemoteError {
 // HKVCStatusReport as defined above.
 //
 // TODO: implement the GetStatus remote method
+func (p *HKVCParticipant) GetStatus() (HKVCStatusReport, remote.RemoteError) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	sr := HKVCStatusReport{
+		Active:      p.isActive,
+		GroupLeader: make(map[int]bool),
+		GroupCommit: make(map[int]int),
+	}
+
+	for gid, rp := range p.raftPeers {
+		report, _ := rp.GetStatus()
+		sr.GroupLeader[gid] = report.Leader
+		if report.Leader {
+			sr.GroupCommit[gid] = report.CommitIndex
+		}
+	}
+	return sr, remote.RemoteError{}
+}
