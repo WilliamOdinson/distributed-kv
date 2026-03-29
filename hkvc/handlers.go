@@ -118,7 +118,37 @@ func (p *HKVCParticipant) handleGetMetadata(w http.ResponseWriter, r *http.Reque
 }
 
 func (p *HKVCParticipant) handleGet(w http.ResponseWriter, r *http.Request) {
-
+	var req KeyRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		sendJSONResponse(w, http.StatusBadRequest, HKVCErrorResponse{ErrorType: InvalidError, ErrorInfo: "bad json", ClientID: ""})
+		return
+	}
+	dir, ok := normalizeDir(req.Directory)
+	if !ok || req.Key == "" {
+		sendJSONResponse(w, http.StatusBadRequest, HKVCErrorResponse{ErrorType: InvalidError, ErrorInfo: "bad request", ClientID: req.ClientID})
+		return
+	}
+	sr, _ := p.raftPeers[0].GetStatus()
+	if !sr.Leader || !sr.Active {
+		sendJSONResponse(w, http.StatusForbidden, HKVCErrorResponse{ErrorType: NonLeaderError, ErrorInfo: "not leader", ClientID: req.ClientID})
+		return
+	}
+	p.mu.Lock()
+	node := p.resolveDir(dir)
+	if node == nil {
+		p.mu.Unlock()
+		sendJSONResponse(w, http.StatusNotFound, HKVCErrorResponse{ErrorType: DirNotFoundError, ErrorInfo: "dir not found", ClientID: req.ClientID})
+		return
+	}
+	e, ok := node.kvPairs[req.Key]
+	if !ok {
+		p.mu.Unlock()
+		sendJSONResponse(w, http.StatusNotFound, HKVCErrorResponse{ErrorType: KeyNotFoundError, ErrorInfo: "key not found", ClientID: req.ClientID})
+		return
+	}
+	val := e.value
+	p.mu.Unlock()
+	sendJSONResponse(w, http.StatusOK, KeyValueMessage{Directory: dir, Key: req.Key, Value: val, ClientID: req.ClientID})
 }
 
 func (p *HKVCParticipant) handleSet(w http.ResponseWriter, r *http.Request) {
