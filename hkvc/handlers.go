@@ -187,7 +187,35 @@ func (p *HKVCParticipant) handleSet(w http.ResponseWriter, r *http.Request) {
 }
 
 func (p *HKVCParticipant) handleCreate(w http.ResponseWriter, r *http.Request) {
-
+	var req KeyRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		sendJSONResponse(w, http.StatusBadRequest, HKVCErrorResponse{ErrorType: InvalidError, ErrorInfo: "bad json", ClientID: ""})
+		return
+	}
+	dir, ok := normalizeDir(req.Directory)
+	if !ok || req.Key == "" {
+		sendJSONResponse(w, http.StatusBadRequest, HKVCErrorResponse{ErrorType: InvalidError, ErrorInfo: "bad request", ClientID: req.ClientID})
+		return
+	}
+	sr, _ := p.raftPeers[0].GetStatus()
+	if !sr.Leader || !sr.Active {
+		sendJSONResponse(w, http.StatusForbidden, HKVCErrorResponse{ErrorType: NonLeaderError, ErrorInfo: "not leader", ClientID: req.ClientID})
+		return
+	}
+	p.mu.Lock()
+	node := p.resolveDir(dir)
+	if node == nil {
+		p.mu.Unlock()
+		sendJSONResponse(w, http.StatusNotFound, HKVCErrorResponse{ErrorType: DirNotFoundError, ErrorInfo: "dir not found", ClientID: req.ClientID})
+		return
+	}
+	node.subDirs[req.Key] = &directory{
+		name:    "/",
+		subDirs: make(map[string]*directory),
+		kvPairs: make(map[string]*kvPair),
+	}
+	p.mu.Unlock()
+	sendJSONResponse(w, http.StatusCreated, KeySuccessResponse{Directory: dir, Key: req.Key, Success: true, ClientID: req.ClientID})
 }
 
 func (p *HKVCParticipant) handleDelete(w http.ResponseWriter, r *http.Request) {
