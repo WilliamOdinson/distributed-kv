@@ -188,7 +188,7 @@ func (p *HKVCParticipant) Terminate() remote.RemoteError {
 	p.isActive = false
 
 	for _, rp := range p.raftPeers {
-		rp.Terminate()
+		rp.TerminateHKVC()
 	}
 
 	p.controlCallee.Stop()

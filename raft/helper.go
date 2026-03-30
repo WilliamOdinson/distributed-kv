@@ -38,3 +38,14 @@ func NewHKVCRaftPeer(id int, selfAddr string, peerAddrs []string) *RaftPeer {
 	go rp.run()
 	return rp
 }
+
+func (rp *RaftPeer) TerminateHKVC() {
+	rp.mu.Lock()
+	defer rp.mu.Unlock()
+	if rp.isTerminated {
+		return
+	}
+	rp.isTerminated = true
+	rp.isActivate = false
+	rp.raftCalleeStub.Stop()
+}
