@@ -183,7 +183,11 @@ func (p *HKVCParticipant) handleSet(w http.ResponseWriter, r *http.Request) {
 		node.kvPairs[req.Key] = &kvPair{key: req.Key, value: req.Value, version: 1}
 	}
 	p.mu.Unlock()
-	sendJSONResponse(w, http.StatusOK, KeySuccessResponse{Directory: dir, Key: req.Key, Success: true, ClientID: req.ClientID})
+	code := http.StatusCreated
+	if existed {
+		code = http.StatusOK
+	}
+	sendJSONResponse(w, code, KeySuccessResponse{Directory: dir, Key: req.Key, Success: true, ClientID: req.ClientID})
 }
 
 func (p *HKVCParticipant) handleCreate(w http.ResponseWriter, r *http.Request) {
