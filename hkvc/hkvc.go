@@ -76,7 +76,8 @@ func NewHKVCParticipant(pInfo []HKVCSetupInfo, index int, groups map[int][]int) 
 			kvPairs: make(map[string]*kvPair),
 		},
 
-		mux: http.NewServeMux(),
+		mux:        http.NewServeMux(),
+		ClientAddr: pInfo[index].ClientAddr,
 
 		raftPeers: make(map[int]*raft.RaftPeer),
 	}
