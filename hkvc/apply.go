@@ -1,6 +1,7 @@
 package hkvc
 
 import (
+	"encoding/json"
 	"net/http"
 )
 
@@ -61,4 +62,24 @@ func (p *HKVCParticipant) applyDeleteCmd(groupID int, command *raftCommand) *app
 		return &applyResult{success: true, status: http.StatusOK}
 	}
 	return &applyResult{success: false, status: http.StatusNotFound}
+}
+
+func (p *HKVCParticipant) ensureApplied(groupID int) {
+	rp := p.raftPeers[groupID]
+	report, _ := rp.GetStatus()
+
+	for p.lastApplied[groupID] < report.CommitIndex {
+		p.lastApplied[groupID]++
+		idx := p.lastApplied[groupID]
+		cmdBytes := rp.GetLogEntry(idx)
+		if cmdBytes == nil {
+			continue
+		}
+		var command raftCommand
+		if err := json.Unmarshal(cmdBytes, &command); err != nil {
+			continue
+		}
+		result := p.applyCommand(groupID, &command)
+		p.applyResults[groupID][idx] = result
+	}
 }

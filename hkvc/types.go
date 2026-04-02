@@ -126,7 +126,9 @@ type HKVCParticipant struct {
 
 	root *directory // root directory of the participant's key-value store
 
-	raftPeers map[int]*raft.RaftPeer // map of groupID to RaftPeer for the participant's raft interface specific to Raft group with ID groupID
+	raftPeers    map[int]*raft.RaftPeer       // map of groupID to RaftPeer for the participant's raft interface specific to Raft group with ID groupID
+	lastApplied  map[int]int                  // per-group: last applied log index
+	applyResults map[int]map[int]*applyResult // per-group: map of log index to applyResult for the command at that log index
 }
 
 type directory struct {

@@ -82,3 +82,12 @@ func (rp *RaftPeer) WaitForCommit(index int, timeout time.Duration) (int, bool) 
 		time.Sleep(HeartbeatInterval)
 	}
 }
+
+func (rp *RaftPeer) GetLogEntry(index int) []byte {
+	rp.mu.Lock()
+	defer rp.mu.Unlock()
+	if index > 0 && index < len(rp.log) {
+		return rp.log[index].Command
+	}
+	return nil
+}
