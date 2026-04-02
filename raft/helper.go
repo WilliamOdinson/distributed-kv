@@ -1,6 +1,9 @@
 package raft
 
-import "remote"
+import (
+	"remote"
+	"time"
+)
 
 func NewHKVCRaftPeer(id int, selfAddr string, peerAddrs []string) *RaftPeer {
 	rp := &RaftPeer{
@@ -48,4 +51,34 @@ func (rp *RaftPeer) TerminateHKVC() {
 	rp.isTerminated = true
 	rp.isActive = false
 	rp.raftCalleeStub.Stop()
+}
+
+func (rp *RaftPeer) SubmitCommand(command []byte) (int, bool) {
+	sr, _ := rp.NewCommand(command)
+	return sr.Index, sr.IsLeader
+}
+
+func (rp *RaftPeer) WaitForCommit(index int, timeout time.Duration) (int, bool) {
+	ddl := time.Now().Add(timeout)
+	for {
+		rp.mu.Lock()
+		if rp.isTerminated {
+			rp.mu.Unlock()
+			return -1, false
+		}
+		if rp.commitIndex >= index {
+			rp.mu.Unlock()
+			return index, true
+		}
+		if !rp.isLeader || !rp.isActive {
+			rp.mu.Unlock()
+			return -1, false
+		}
+		rp.mu.Unlock()
+
+		if time.Now().After(ddl) {
+			return -1, false
+		}
+		time.Sleep(HeartbeatInterval)
+	}
 }
