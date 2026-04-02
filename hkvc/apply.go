@@ -3,6 +3,11 @@ package hkvc
 import (
 	"encoding/json"
 	"net/http"
+	"time"
+)
+
+const (
+	applyTimeout = 3 * time.Second
 )
 
 func (p *HKVCParticipant) applyCommand(groupID int, command *raftCommand) *applyResult {
@@ -82,4 +87,17 @@ func (p *HKVCParticipant) ensureApplied(groupID int) {
 		result := p.applyCommand(groupID, &command)
 		p.applyResults[groupID][idx] = result
 	}
+}
+
+func (p *HKVCParticipant) submitAndWait(cmd *raftCommand) int {
+	cmdBytes, _ := json.Marshal(cmd)
+	rp := p.raftPeers[0]
+	logIndex, isLeader := rp.SubmitCommand(cmdBytes)
+	if !isLeader {
+		return -1
+	}
+	if _, ok := rp.WaitForCommit(logIndex, applyTimeout); !ok {
+		return -1
+	}
+	return logIndex
 }
