@@ -140,3 +140,15 @@ type kvPair struct {
 	value   string
 	version uint64
 }
+
+type raftCommand struct {
+	Op        string
+	Directory string
+	Key       string
+	Value     string
+}
+
+type applyResult struct {
+	success bool
+	status  int
+}
