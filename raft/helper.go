@@ -6,7 +6,7 @@ func NewHKVCRaftPeer(id int, selfAddr string, peerAddrs []string) *RaftPeer {
 	rp := &RaftPeer{
 		id:           id,
 		totalPeers:   len(peerAddrs) + 1,
-		isActivate:   false,
+		isActive:     false,
 		isTerminated: false,
 		isLeader:     false,
 		isCandidate:  false,
@@ -46,6 +46,6 @@ func (rp *RaftPeer) TerminateHKVC() {
 		return
 	}
 	rp.isTerminated = true
-	rp.isActivate = false
+	rp.isActive = false
 	rp.raftCalleeStub.Stop()
 }

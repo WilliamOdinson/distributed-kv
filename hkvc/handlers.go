@@ -57,7 +57,7 @@ func (p *HKVCParticipant) handleList(w http.ResponseWriter, r *http.Request) {
 	}
 	sr, _ := p.raftPeers[0].GetStatus()
 
-	if !sr.Leader || !sr.Active {
+	if !sr.IsLeader || !sr.IsActive {
 		sendJSONResponse(w, http.StatusForbidden, HKVCErrorResponse{ErrorType: NonLeaderError, ErrorInfo: "not leader", ClientID: req.ClientID})
 		return
 	}
@@ -92,7 +92,7 @@ func (p *HKVCParticipant) handleGetMetadata(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	sr, _ := p.raftPeers[0].GetStatus()
-	if !sr.Leader || !sr.Active {
+	if !sr.IsLeader || !sr.IsActive {
 		sendJSONResponse(w, http.StatusForbidden, HKVCErrorResponse{ErrorType: NonLeaderError, ErrorInfo: "not leader", ClientID: req.ClientID})
 		return
 	}
@@ -129,7 +129,7 @@ func (p *HKVCParticipant) handleGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sr, _ := p.raftPeers[0].GetStatus()
-	if !sr.Leader || !sr.Active {
+	if !sr.IsLeader || !sr.IsActive {
 		sendJSONResponse(w, http.StatusForbidden, HKVCErrorResponse{ErrorType: NonLeaderError, ErrorInfo: "not leader", ClientID: req.ClientID})
 		return
 	}
@@ -163,7 +163,7 @@ func (p *HKVCParticipant) handleSet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sr, _ := p.raftPeers[0].GetStatus()
-	if !sr.Leader || !sr.Active {
+	if !sr.IsLeader || !sr.IsActive {
 		sendJSONResponse(w, http.StatusForbidden, HKVCErrorResponse{ErrorType: NonLeaderError, ErrorInfo: "not leader", ClientID: req.ClientID})
 		return
 	}
@@ -202,7 +202,7 @@ func (p *HKVCParticipant) handleCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sr, _ := p.raftPeers[0].GetStatus()
-	if !sr.Leader || !sr.Active {
+	if !sr.IsLeader || !sr.IsActive {
 		sendJSONResponse(w, http.StatusForbidden, HKVCErrorResponse{ErrorType: NonLeaderError, ErrorInfo: "not leader", ClientID: req.ClientID})
 		return
 	}
@@ -234,7 +234,7 @@ func (p *HKVCParticipant) handleDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sr, _ := p.raftPeers[0].GetStatus()
-	if !sr.Leader || !sr.Active {
+	if !sr.IsLeader || !sr.IsActive {
 		sendJSONResponse(w, http.StatusForbidden, HKVCErrorResponse{ErrorType: NonLeaderError, ErrorInfo: "not leader", ClientID: req.ClientID})
 		return
 	}

@@ -13,7 +13,7 @@ func NewRaftPeer(peerInfo []RaftSetupInfo, index int) {
 	rp := &RaftPeer{
 		id:           peerInfo[index].Id,
 		totalPeers:   len(peerInfo),
-		isActivate:   false,
+		isActive:     false,
 		isTerminated: false,
 		isLeader:     false,
 		isCandidate:  false,
@@ -64,7 +64,7 @@ func (rp *RaftPeer) Activate() remote.RemoteError {
 	rp.mu.Lock()
 	defer rp.mu.Unlock()
 
-	rp.isActivate = true
+	rp.isActive = true
 	rp.resetElectionTimeout()
 	rp.raftCalleeStub.Start()
 
@@ -76,7 +76,7 @@ func (rp *RaftPeer) Deactivate() remote.RemoteError {
 	rp.mu.Lock()
 	defer rp.mu.Unlock()
 
-	rp.isActivate = false
+	rp.isActive = false
 
 	rp.raftCalleeStub.Stop()
 	return remote.RemoteError{}
@@ -90,7 +90,7 @@ func (rp *RaftPeer) Terminate() remote.RemoteError {
 		return remote.RemoteError{}
 	}
 	rp.isTerminated = true
-	rp.isActivate = false
+	rp.isActive = false
 
 	rp.raftCalleeStub.Stop()
 	rp.controlCalleeStub.Stop()
@@ -116,8 +116,8 @@ func (rp *RaftPeer) GetStatus() (StatusReport, remote.RemoteError) {
 		Index:       len(rp.log) - 1,
 		CommitIndex: rp.commitIndex,
 		Term:        rp.currentTerm,
-		Leader:      rp.isLeader,
-		Active:      rp.isActivate,
+		IsLeader:    rp.isLeader,
+		IsActive:    rp.isActive,
 		CallCount:   callCount,
 	}, remote.RemoteError{}
 }
@@ -141,17 +141,17 @@ func (rp *RaftPeer) NewCommand(command []byte) (StatusReport, remote.RemoteError
 	rp.mu.Lock()
 	defer rp.mu.Unlock()
 
-	if !rp.isActivate {
+	if !rp.isActive {
 		return StatusReport{
 			Index:     0,
 			Term:      rp.currentTerm,
-			Leader:    false,
-			Active:    rp.isActivate,
+			IsLeader:  false,
+			IsActive:  rp.isActive,
 			CallCount: 0,
 		}, remote.RemoteError{}
 	}
 
-	if rp.isActivate && !rp.isTerminated && rp.isLeader {
+	if rp.isActive && !rp.isTerminated && rp.isLeader {
 		rp.log = append(rp.log, LogEntry{
 			Term:    rp.currentTerm,
 			Command: command,
@@ -161,8 +161,8 @@ func (rp *RaftPeer) NewCommand(command []byte) (StatusReport, remote.RemoteError
 	return StatusReport{
 		Index:     len(rp.log) - 1,
 		Term:      rp.currentTerm,
-		Leader:    rp.isLeader,
-		Active:    rp.isActivate,
+		IsLeader:  rp.isLeader,
+		IsActive:  rp.isActive,
 		CallCount: 0,
 	}, remote.RemoteError{}
 }

@@ -214,8 +214,8 @@ func (p *HKVCParticipant) GetStatus() (HKVCStatusReport, remote.RemoteError) {
 
 	for gid, rp := range p.raftPeers {
 		report, _ := rp.GetStatus()
-		sr.GroupLeader[gid] = report.Leader
-		if report.Leader {
+		sr.GroupLeader[gid] = report.IsLeader
+		if report.IsLeader {
 			sr.GroupCommit[gid] = report.CommitIndex
 		}
 	}

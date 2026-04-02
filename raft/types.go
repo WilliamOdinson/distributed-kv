@@ -25,8 +25,8 @@ type StatusReport struct {
 	Index       int
 	CommitIndex int
 	Term        int
-	Leader      bool
-	Active      bool
+	IsLeader    bool
+	IsActive    bool
 	CallCount   int
 }
 
@@ -58,7 +58,7 @@ type RaftPeer struct {
 	// Persistent state on all servers, controlled by Controller
 	id           int  // unique identifier
 	totalPeers   int  // total number of peers in the Raft group
-	isActivate   bool // whether this peer is active
+	isActive     bool // whether this peer is active
 	isTerminated bool // whether this peer has been terminated
 
 	// Volatile state on all servers, controlled by Raft algorithm

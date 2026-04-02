@@ -142,7 +142,7 @@ func (ctrl *Controller) findLeader() int {
 				fmt.Println("warning: remote call GetStatus failed -- " + re.Error())
 				continue
 			}
-			if sr.Active && sr.Leader {
+			if sr.IsActive && sr.IsLeader {
 				leaders[sr.Term] = append(leaders[sr.Term], i)
 			}
 		}
@@ -173,7 +173,7 @@ func (ctrl *Controller) getTerm() int {
 			fmt.Println("warning: remote call GetStatus failed -- " + re.Error())
 			continue
 		}
-		if sr.Active && sr.Term > 0 {
+		if sr.IsActive && sr.Term > 0 {
 			if term == -1 {
 				term = sr.Term
 			} else if term != sr.Term {
@@ -193,7 +193,7 @@ func (ctrl *Controller) ensureNoLeader() {
 			fmt.Println("warning: remote call GetStatus failed -- " + re.Error())
 			continue
 		}
-		if sr.Active && sr.Leader {
+		if sr.IsActive && sr.IsLeader {
 			ctrl.t.Fatalf("Expected no leader, but %d claims to be leader", i)
 		}
 	}
@@ -343,7 +343,7 @@ func TestCheckpoint_Commit(t *testing.T) {
 		cmd := []byte("commit me " + strconv.Itoa(i+1))
 
 		sr, re := ctrl.stubs[ldr].NewCommand(cmd)
-		if re.Error() != "" || !sr.Leader {
+		if re.Error() != "" || !sr.IsLeader {
 			t.Fatalf("Leader failed to accept a command")
 		}
 		time.Sleep(250 * time.Millisecond)

@@ -19,7 +19,7 @@ func (rp *RaftPeer) run() {
 			rp.mu.Unlock()
 			return
 		}
-		if !rp.isActivate {
+		if !rp.isActive {
 			rp.mu.Unlock()
 			continue
 		}
@@ -111,7 +111,7 @@ func (rp *RaftPeer) calculateCommitIndex() int {
 func (rp *RaftPeer) StartElection() {
 	rp.mu.Lock()
 
-	if !rp.isActivate || rp.isTerminated {
+	if !rp.isActive || rp.isTerminated {
 		rp.mu.Unlock()
 		return
 	}

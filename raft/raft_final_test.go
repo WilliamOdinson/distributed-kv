@@ -42,7 +42,7 @@ func (ctrl *Controller) startCommit(cmd []byte, expectedPeers int) int {
 		index := -1
 		for i := range ctrl.totalPeers {
 			sr := ctrl.issueCommand(i, cmd)
-			if sr.Index > 0 && sr.Active && sr.Leader {
+			if sr.Index > 0 && sr.IsActive && sr.IsLeader {
 				index = sr.Index
 				break
 			}
@@ -208,7 +208,7 @@ func TestFinal_ConsistentRecovery(t *testing.T) {
 	ctrl.disconnect((leader1 + 3) % totalPeers)
 
 	sr1 := ctrl.issueCommand(leader1, []byte("commit me if you can"))
-	if !sr1.Active || !sr1.Leader {
+	if !sr1.IsActive || !sr1.IsLeader {
 		t.Fatalf("Unexpected leader disconnection or change leading to command rejection")
 	}
 	if sr1.Index != 2 {
@@ -230,7 +230,7 @@ func TestFinal_ConsistentRecovery(t *testing.T) {
 	fmt.Print("Checking for consistent logs after everyone reconnects ... ")
 	leader2 := ctrl.findLeader()
 	sr2 := ctrl.issueCommand(leader2, []byte("commit me please"))
-	if !sr2.Active || !sr2.Leader {
+	if !sr2.IsActive || !sr2.IsLeader {
 		t.Fatalf("Unexpected leader disconnection or change leading to command rejection")
 	}
 
@@ -421,7 +421,7 @@ func TestFinal_CallCount(t *testing.T) {
 			maxIters := 10
 
 			sr1 := ctrl.issueCommand(leader, []byte("initial command"))
-			if !sr1.Leader {
+			if !sr1.IsLeader {
 				// leader changed too quickly, try again or give up
 				fmt.Println("leader changed during count, try again...")
 				return
@@ -434,7 +434,7 @@ func TestFinal_CallCount(t *testing.T) {
 
 				sr2 := ctrl.issueCommand(leader, x)
 
-				if sr2.Term != sr1.Term || !sr2.Leader {
+				if sr2.Term != sr1.Term || !sr2.IsLeader {
 					// term changed while starting or no longer leader, try again
 					fmt.Println("leader/term changed during count, try again...")
 					return
