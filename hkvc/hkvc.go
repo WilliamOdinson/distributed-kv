@@ -79,7 +79,9 @@ func NewHKVCParticipant(pInfo []HKVCSetupInfo, index int, groups map[int][]int) 
 		mux:        http.NewServeMux(),
 		ClientAddr: pInfo[index].ClientAddr,
 
-		raftPeers: make(map[int]*raft.RaftPeer),
+		raftPeers:    make(map[int]*raft.RaftPeer),
+		lastApplied:  make(map[int]int),
+		applyResults: make(map[int]map[int]*applyResult),
 	}
 
 	p.mux.HandleFunc("/list", p.handleList)
@@ -107,6 +109,8 @@ func NewHKVCParticipant(pInfo []HKVCSetupInfo, index int, groups map[int][]int) 
 			}
 		}
 		p.raftPeers[gid] = raft.NewHKVCRaftPeer(pInfo[index].Id, pInfo[index].RaftAddrs[gid], peerAddrs)
+		p.lastApplied[gid] = 0
+		p.applyResults[gid] = make(map[int]*applyResult)
 	}
 
 	ctrlIfc := &HKVCControlInterface{}
