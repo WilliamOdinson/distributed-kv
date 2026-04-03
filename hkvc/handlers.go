@@ -211,20 +211,30 @@ func (p *HKVCParticipant) handleCreate(w http.ResponseWriter, r *http.Request) {
 		sendJSONResponse(w, http.StatusForbidden, HKVCErrorResponse{ErrorType: NonLeaderError, ErrorInfo: "not leader", ClientID: req.ClientID})
 		return
 	}
+
 	p.mu.Lock()
+	p.ensureApplied(0)
 	node := p.resolveDir(dir)
 	if node == nil {
 		p.mu.Unlock()
 		sendJSONResponse(w, http.StatusNotFound, HKVCErrorResponse{ErrorType: DirNotFoundError, ErrorInfo: "dir not found", ClientID: req.ClientID})
 		return
 	}
-	node.subDirs[req.Key] = &directory{
-		name:    "/",
-		subDirs: make(map[string]*directory),
-		kvPairs: make(map[string]*kvPair),
-	}
 	p.mu.Unlock()
-	sendJSONResponse(w, http.StatusCreated, KeySuccessResponse{Directory: dir, Key: req.Key, Success: true, ClientID: req.ClientID})
+
+	logIndex := p.submitAndWait(&raftCommand{Op: "create", Directory: dir, Key: req.Key})
+	if logIndex < 0 {
+		sendJSONResponse(w, http.StatusForbidden, HKVCErrorResponse{ErrorType: NonLeaderError, ErrorInfo: "lost leadership", ClientID: req.ClientID})
+		return
+	}
+
+	p.mu.Lock()
+	p.ensureApplied(0)
+	result := p.applyResults[0][logIndex]
+	delete(p.applyResults[0], logIndex)
+	p.mu.Unlock()
+
+	sendJSONResponse(w, result.status, KeySuccessResponse{Directory: dir, Key: req.Key, Success: result.success, ClientID: req.ClientID})
 }
 
 func (p *HKVCParticipant) handleDelete(w http.ResponseWriter, r *http.Request) {
@@ -243,25 +253,35 @@ func (p *HKVCParticipant) handleDelete(w http.ResponseWriter, r *http.Request) {
 		sendJSONResponse(w, http.StatusForbidden, HKVCErrorResponse{ErrorType: NonLeaderError, ErrorInfo: "not leader", ClientID: req.ClientID})
 		return
 	}
+
 	p.mu.Lock()
+	p.ensureApplied(0)
 	node := p.resolveDir(dir)
 	if node == nil {
 		p.mu.Unlock()
 		sendJSONResponse(w, http.StatusNotFound, HKVCErrorResponse{ErrorType: DirNotFoundError, ErrorInfo: "dir not found", ClientID: req.ClientID})
 		return
 	}
-	if _, ok := node.kvPairs[req.Key]; ok {
-		delete(node.kvPairs, req.Key)
+	_, hasKey := node.kvPairs[req.Key]
+	_, hasDir := node.subDirs[req.Key]
+	if !hasKey && !hasDir {
 		p.mu.Unlock()
-		sendJSONResponse(w, http.StatusOK, KeySuccessResponse{Directory: dir, Key: req.Key, Success: true, ClientID: req.ClientID})
-		return
-	}
-	if _, ok := node.subDirs[req.Key]; ok {
-		delete(node.subDirs, req.Key)
-		p.mu.Unlock()
-		sendJSONResponse(w, http.StatusOK, KeySuccessResponse{Directory: dir, Key: req.Key, Success: true, ClientID: req.ClientID})
+		sendJSONResponse(w, http.StatusNotFound, HKVCErrorResponse{ErrorType: KeyNotFoundError, ErrorInfo: "key not found", ClientID: req.ClientID})
 		return
 	}
 	p.mu.Unlock()
-	sendJSONResponse(w, http.StatusNotFound, HKVCErrorResponse{ErrorType: KeyNotFoundError, ErrorInfo: "key not found", ClientID: req.ClientID})
+
+	logIndex := p.submitAndWait(&raftCommand{Op: "delete", Directory: dir, Key: req.Key})
+	if logIndex < 0 {
+		sendJSONResponse(w, http.StatusForbidden, HKVCErrorResponse{ErrorType: NonLeaderError, ErrorInfo: "lost leadership", ClientID: req.ClientID})
+		return
+	}
+
+	p.mu.Lock()
+	p.ensureApplied(0)
+	result := p.applyResults[0][logIndex]
+	delete(p.applyResults[0], logIndex)
+	p.mu.Unlock()
+
+	sendJSONResponse(w, result.status, KeySuccessResponse{Directory: dir, Key: req.Key, Success: result.success, ClientID: req.ClientID})
 }
