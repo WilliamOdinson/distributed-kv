@@ -144,10 +144,10 @@ type kvPair struct {
 }
 
 type raftCommand struct {
-	Op        string
-	Directory string
-	Key       string
-	Value     string
+	Op        string `json:"op"`
+	Directory string `json:"dir"`
+	Key       string `json:"key"`
+	Value     string `json:"val"`
 }
 
 type applyResult struct {
