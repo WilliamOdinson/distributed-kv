@@ -167,27 +167,32 @@ func (p *HKVCParticipant) handleSet(w http.ResponseWriter, r *http.Request) {
 		sendJSONResponse(w, http.StatusForbidden, HKVCErrorResponse{ErrorType: NonLeaderError, ErrorInfo: "not leader", ClientID: req.ClientID})
 		return
 	}
+
 	p.mu.Lock()
+	p.ensureApplied(0)
 	node := p.resolveDir(dir)
 	if node == nil {
 		p.mu.Unlock()
 		sendJSONResponse(w, http.StatusNotFound, HKVCErrorResponse{ErrorType: DirNotFoundError, ErrorInfo: "dir not found", ClientID: req.ClientID})
 		return
 	}
-
-	_, existed := node.kvPairs[req.Key]
-	if existed {
-		node.kvPairs[req.Key].value = req.Value
-		node.kvPairs[req.Key].version++
-	} else {
-		node.kvPairs[req.Key] = &kvPair{key: req.Key, value: req.Value, version: 1}
-	}
 	p.mu.Unlock()
-	code := http.StatusCreated
-	if existed {
-		code = http.StatusOK
+
+	// submit to raft, wait for commit
+	logIndex := p.submitAndWait(&raftCommand{Op: "set", Directory: dir, Key: req.Key, Value: req.Value})
+	if logIndex < 0 {
+		sendJSONResponse(w, http.StatusForbidden, HKVCErrorResponse{ErrorType: NonLeaderError, ErrorInfo: "lost leadership", ClientID: req.ClientID})
+		return
 	}
-	sendJSONResponse(w, code, KeySuccessResponse{Directory: dir, Key: req.Key, Success: true, ClientID: req.ClientID})
+
+	// apply and get result
+	p.mu.Lock()
+	p.ensureApplied(0)
+	result := p.applyResults[0][logIndex]
+	delete(p.applyResults[0], logIndex)
+	p.mu.Unlock()
+
+	sendJSONResponse(w, result.status, KeySuccessResponse{Directory: dir, Key: req.Key, Success: result.success, ClientID: req.ClientID})
 }
 
 func (p *HKVCParticipant) handleCreate(w http.ResponseWriter, r *http.Request) {
