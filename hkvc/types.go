@@ -129,6 +129,9 @@ type HKVCParticipant struct {
 	raftPeers    map[int]*raft.RaftPeer       // map of groupID to RaftPeer for the participant's raft interface specific to Raft group with ID groupID
 	lastApplied  map[int]int                  // per-group: last applied log index
 	applyResults map[int]map[int]*applyResult // per-group: map of log index to applyResult for the command at that log index
+
+	clientSeq  map[string]int             // clientID -> highest seq_number processed
+	clientResp map[string]*cachedResponse // clientID -> cached response for that seq_number
 }
 
 type directory struct {
@@ -153,4 +156,9 @@ type raftCommand struct {
 type applyResult struct {
 	success bool
 	status  int
+}
+
+type cachedResponse struct {
+	statusCode int
+	body       any
 }

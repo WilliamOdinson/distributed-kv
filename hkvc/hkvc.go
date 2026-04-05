@@ -82,6 +82,9 @@ func NewHKVCParticipant(pInfo []HKVCSetupInfo, index int, groups map[int][]int) 
 		raftPeers:    make(map[int]*raft.RaftPeer),
 		lastApplied:  make(map[int]int),
 		applyResults: make(map[int]map[int]*applyResult),
+
+		clientSeq:  make(map[string]int),
+		clientResp: make(map[string]*cachedResponse),
 	}
 
 	p.mux.HandleFunc("/list", p.handleList)
