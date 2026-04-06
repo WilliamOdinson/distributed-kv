@@ -6,6 +6,12 @@ import (
 	"strings"
 )
 
+const (
+	SEQ_FRESH     = 1  // new request, proceed with processing
+	SEQ_DUPLICATE = 0  // same seq as last request, replay cached response
+	SEQ_OUTDATED  = -1 // seq older than last request, reject with 406
+)
+
 func sendJSONResponse(w http.ResponseWriter, code int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
@@ -44,6 +50,26 @@ func (p *HKVCParticipant) resolveDir(path string) *directory {
 	return cur
 }
 
+func (p *HKVCParticipant) checkSeq(clientID string, seqNum int) int {
+	lastSeq, exists := p.clientSeq[clientID]
+	if !exists {
+		return SEQ_FRESH // first request from this client
+	}
+	if seqNum > lastSeq {
+		return SEQ_FRESH // new request, update last seq
+	}
+	if seqNum == lastSeq {
+		return SEQ_DUPLICATE // same seq as last request, replay cached response
+	}
+	return SEQ_OUTDATED // seq older than last request, reject with 406
+}
+
+func (p *HKVCParticipant) cacheAndResponse(w http.ResponseWriter, clientID string, code int, body any) {
+	p.clientResp[clientID] = &cachedResponse{statusCode: code, body: body}
+	p.mu.Unlock()
+	sendJSONResponse(w, code, body)
+}
+
 func (p *HKVCParticipant) handleList(w http.ResponseWriter, r *http.Request) {
 	var req DirectoryRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -63,10 +89,26 @@ func (p *HKVCParticipant) handleList(w http.ResponseWriter, r *http.Request) {
 	}
 
 	p.mu.Lock()
+	switch p.checkSeq(req.ClientID, req.SeqNumber) {
+	case SEQ_FRESH:
+		// proceed with processing
+	case SEQ_DUPLICATE:
+		// replay cached response
+		cached := p.clientResp[req.ClientID]
+		p.mu.Unlock()
+		sendJSONResponse(w, cached.statusCode, cached.body)
+		return
+	case SEQ_OUTDATED:
+		// reject with 406
+		p.mu.Unlock()
+		sendJSONResponse(w, http.StatusNotAcceptable, HKVCErrorResponse{ErrorType: OutOfSequenceError, ErrorInfo: "out of sequence number", ClientID: req.ClientID})
+		return
+	}
+	p.clientSeq[req.ClientID] = req.SeqNumber
+
 	node := p.resolveDir(dir)
 	if node == nil {
-		p.mu.Unlock()
-		sendJSONResponse(w, http.StatusNotFound, HKVCErrorResponse{ErrorType: DirNotFoundError, ErrorInfo: "dir not found", ClientID: req.ClientID})
+		p.cacheAndResponse(w, req.ClientID, http.StatusNotFound, HKVCErrorResponse{ErrorType: DirNotFoundError, ErrorInfo: "dir not found", ClientID: req.ClientID})
 		return
 	}
 	list := make([]string, 0)
@@ -76,8 +118,8 @@ func (p *HKVCParticipant) handleList(w http.ResponseWriter, r *http.Request) {
 	for k := range node.kvPairs {
 		list = append(list, k)
 	}
-	p.mu.Unlock()
-	sendJSONResponse(w, http.StatusOK, ListResponse{Directory: dir, List: list, ClientID: req.ClientID})
+
+	p.cacheAndResponse(w, req.ClientID, http.StatusOK, ListResponse{Directory: dir, List: list, ClientID: req.ClientID})
 }
 
 func (p *HKVCParticipant) handleGetMetadata(w http.ResponseWriter, r *http.Request) {
@@ -97,6 +139,24 @@ func (p *HKVCParticipant) handleGetMetadata(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	p.mu.Lock()
+
+	switch p.checkSeq(req.ClientID, req.SeqNumber) {
+	case SEQ_FRESH:
+		// proceed with processing
+	case SEQ_DUPLICATE:
+		// replay cached response
+		cached := p.clientResp[req.ClientID]
+		p.mu.Unlock()
+		sendJSONResponse(w, cached.statusCode, cached.body)
+		return
+	case SEQ_OUTDATED:
+		// reject with 406
+		p.mu.Unlock()
+		sendJSONResponse(w, http.StatusNotAcceptable, HKVCErrorResponse{ErrorType: OutOfSequenceError, ErrorInfo: "out of sequence number", ClientID: req.ClientID})
+		return
+	}
+	p.clientSeq[req.ClientID] = req.SeqNumber
+
 	node := p.resolveDir(dir)
 	if node == nil {
 		p.mu.Unlock()
@@ -104,17 +164,15 @@ func (p *HKVCParticipant) handleGetMetadata(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	if _, ok := node.subDirs[req.Key]; ok {
-		p.mu.Unlock()
-		sendJSONResponse(w, http.StatusOK, MetadataResponse{Directory: dir, Key: req.Key, IsDirectory: true, Size: -1, PAddrList: []string{}, Tags: []string{}, ClientID: req.ClientID})
+		p.cacheAndResponse(w, req.ClientID, http.StatusOK, MetadataResponse{Directory: dir, Key: req.Key, IsDirectory: true, Size: -1, PAddrList: []string{}, Tags: []string{}, ClientID: req.ClientID})
 		return
 	}
 	if e, ok := node.kvPairs[req.Key]; ok {
-		p.mu.Unlock()
-		sendJSONResponse(w, http.StatusOK, MetadataResponse{Directory: dir, Key: req.Key, Size: len(e.value), Version: e.version, PAddrList: []string{}, Tags: []string{}, ClientID: req.ClientID})
+		p.cacheAndResponse(w, req.ClientID, http.StatusOK, MetadataResponse{Directory: dir, Key: req.Key, IsDirectory: false, Size: len(e.value), Version: e.version, PAddrList: []string{}, Tags: []string{}, ClientID: req.ClientID})
 		return
 	}
-	p.mu.Unlock()
-	sendJSONResponse(w, http.StatusNotFound, HKVCErrorResponse{ErrorType: KeyNotFoundError, ErrorInfo: "key not found", ClientID: req.ClientID})
+
+	p.cacheAndResponse(w, req.ClientID, http.StatusNotFound, HKVCErrorResponse{ErrorType: KeyNotFoundError, ErrorInfo: "key not found", ClientID: req.ClientID})
 }
 
 func (p *HKVCParticipant) handleGet(w http.ResponseWriter, r *http.Request) {
@@ -134,21 +192,38 @@ func (p *HKVCParticipant) handleGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	p.mu.Lock()
+
+	switch p.checkSeq(req.ClientID, req.SeqNumber) {
+	case SEQ_FRESH:
+		// proceed with processing
+	case SEQ_DUPLICATE:
+		// replay cached response
+		cached := p.clientResp[req.ClientID]
+		p.mu.Unlock()
+		sendJSONResponse(w, cached.statusCode, cached.body)
+		return
+	case SEQ_OUTDATED:
+		// reject with 406
+		p.mu.Unlock()
+		sendJSONResponse(w, http.StatusNotAcceptable, HKVCErrorResponse{ErrorType: OutOfSequenceError, ErrorInfo: "out of sequence number", ClientID: req.ClientID})
+		return
+	}
+	p.clientSeq[req.ClientID] = req.SeqNumber
+
 	node := p.resolveDir(dir)
 	if node == nil {
-		p.mu.Unlock()
-		sendJSONResponse(w, http.StatusNotFound, HKVCErrorResponse{ErrorType: DirNotFoundError, ErrorInfo: "dir not found", ClientID: req.ClientID})
+		p.cacheAndResponse(w, req.ClientID, http.StatusNotFound, HKVCErrorResponse{ErrorType: DirNotFoundError, ErrorInfo: "dir not found", ClientID: req.ClientID})
 		return
 	}
 	e, ok := node.kvPairs[req.Key]
 	if !ok {
-		p.mu.Unlock()
-		sendJSONResponse(w, http.StatusNotFound, HKVCErrorResponse{ErrorType: KeyNotFoundError, ErrorInfo: "key not found", ClientID: req.ClientID})
+		p.cacheAndResponse(w, req.ClientID, http.StatusNotFound, HKVCErrorResponse{ErrorType: KeyNotFoundError, ErrorInfo: "key not found", ClientID: req.ClientID})
 		return
 	}
 	val := e.value
-	p.mu.Unlock()
-	sendJSONResponse(w, http.StatusOK, KeyValueMessage{Directory: dir, Key: req.Key, Value: val, ClientID: req.ClientID})
+	// p.mu.Unlock()
+	// sendJSONResponse(w, http.StatusOK, KeyValueMessage{Directory: dir, Key: req.Key, Value: val, ClientID: req.ClientID})
+	p.cacheAndResponse(w, req.ClientID, http.StatusOK, KeyValueMessage{Directory: dir, Key: req.Key, Value: val, ClientID: req.ClientID})
 }
 
 func (p *HKVCParticipant) handleSet(w http.ResponseWriter, r *http.Request) {
@@ -169,11 +244,28 @@ func (p *HKVCParticipant) handleSet(w http.ResponseWriter, r *http.Request) {
 	}
 
 	p.mu.Lock()
+
+	switch p.checkSeq(req.ClientID, req.SeqNumber) {
+	case SEQ_FRESH:
+		// proceed with processing
+	case SEQ_DUPLICATE:
+		// replay cached response
+		cached := p.clientResp[req.ClientID]
+		p.mu.Unlock()
+		sendJSONResponse(w, cached.statusCode, cached.body)
+		return
+	case SEQ_OUTDATED:
+		// reject with 406
+		p.mu.Unlock()
+		sendJSONResponse(w, http.StatusNotAcceptable, HKVCErrorResponse{ErrorType: OutOfSequenceError, ErrorInfo: "out of sequence number", ClientID: req.ClientID})
+		return
+	}
+	p.clientSeq[req.ClientID] = req.SeqNumber
+
 	p.ensureApplied(0)
 	node := p.resolveDir(dir)
 	if node == nil {
-		p.mu.Unlock()
-		sendJSONResponse(w, http.StatusNotFound, HKVCErrorResponse{ErrorType: DirNotFoundError, ErrorInfo: "dir not found", ClientID: req.ClientID})
+		p.cacheAndResponse(w, req.ClientID, http.StatusNotFound, HKVCErrorResponse{ErrorType: DirNotFoundError, ErrorInfo: "dir not found", ClientID: req.ClientID})
 		return
 	}
 	p.mu.Unlock()
@@ -190,9 +282,8 @@ func (p *HKVCParticipant) handleSet(w http.ResponseWriter, r *http.Request) {
 	p.ensureApplied(0)
 	result := p.applyResults[0][logIndex]
 	delete(p.applyResults[0], logIndex)
-	p.mu.Unlock()
 
-	sendJSONResponse(w, result.status, KeySuccessResponse{Directory: dir, Key: req.Key, Success: result.success, ClientID: req.ClientID})
+	p.cacheAndResponse(w, req.ClientID, result.status, KeySuccessResponse{Directory: dir, Key: req.Key, Success: result.success, ClientID: req.ClientID})
 }
 
 func (p *HKVCParticipant) handleCreate(w http.ResponseWriter, r *http.Request) {
@@ -213,11 +304,28 @@ func (p *HKVCParticipant) handleCreate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	p.mu.Lock()
+
+	switch p.checkSeq(req.ClientID, req.SeqNumber) {
+	case SEQ_FRESH:
+		// proceed with processing
+	case SEQ_DUPLICATE:
+		// replay cached response
+		cached := p.clientResp[req.ClientID]
+		p.mu.Unlock()
+		sendJSONResponse(w, cached.statusCode, cached.body)
+		return
+	case SEQ_OUTDATED:
+		// reject with 406
+		p.mu.Unlock()
+		sendJSONResponse(w, http.StatusNotAcceptable, HKVCErrorResponse{ErrorType: OutOfSequenceError, ErrorInfo: "out of sequence number", ClientID: req.ClientID})
+		return
+	}
+	p.clientSeq[req.ClientID] = req.SeqNumber
+
 	p.ensureApplied(0)
 	node := p.resolveDir(dir)
 	if node == nil {
-		p.mu.Unlock()
-		sendJSONResponse(w, http.StatusNotFound, HKVCErrorResponse{ErrorType: DirNotFoundError, ErrorInfo: "dir not found", ClientID: req.ClientID})
+		p.cacheAndResponse(w, req.ClientID, http.StatusNotFound, HKVCErrorResponse{ErrorType: DirNotFoundError, ErrorInfo: "dir not found", ClientID: req.ClientID})
 		return
 	}
 	p.mu.Unlock()
@@ -232,9 +340,7 @@ func (p *HKVCParticipant) handleCreate(w http.ResponseWriter, r *http.Request) {
 	p.ensureApplied(0)
 	result := p.applyResults[0][logIndex]
 	delete(p.applyResults[0], logIndex)
-	p.mu.Unlock()
-
-	sendJSONResponse(w, result.status, KeySuccessResponse{Directory: dir, Key: req.Key, Success: result.success, ClientID: req.ClientID})
+	p.cacheAndResponse(w, req.ClientID, result.status, KeySuccessResponse{Directory: dir, Key: req.Key, Success: result.success, ClientID: req.ClientID})
 }
 
 func (p *HKVCParticipant) handleDelete(w http.ResponseWriter, r *http.Request) {
@@ -255,18 +361,34 @@ func (p *HKVCParticipant) handleDelete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	p.mu.Lock()
+
+	switch p.checkSeq(req.ClientID, req.SeqNumber) {
+	case SEQ_FRESH:
+		// proceed with processing
+	case SEQ_DUPLICATE:
+		// replay cached response
+		cached := p.clientResp[req.ClientID]
+		p.mu.Unlock()
+		sendJSONResponse(w, cached.statusCode, cached.body)
+		return
+	case SEQ_OUTDATED:
+		// reject with 406
+		p.mu.Unlock()
+		sendJSONResponse(w, http.StatusNotAcceptable, HKVCErrorResponse{ErrorType: OutOfSequenceError, ErrorInfo: "out of sequence number", ClientID: req.ClientID})
+		return
+	}
+	p.clientSeq[req.ClientID] = req.SeqNumber
+
 	p.ensureApplied(0)
 	node := p.resolveDir(dir)
 	if node == nil {
-		p.mu.Unlock()
-		sendJSONResponse(w, http.StatusNotFound, HKVCErrorResponse{ErrorType: DirNotFoundError, ErrorInfo: "dir not found", ClientID: req.ClientID})
+		p.cacheAndResponse(w, req.ClientID, http.StatusNotFound, HKVCErrorResponse{ErrorType: DirNotFoundError, ErrorInfo: "dir not found", ClientID: req.ClientID})
 		return
 	}
 	_, hasKey := node.kvPairs[req.Key]
 	_, hasDir := node.subDirs[req.Key]
 	if !hasKey && !hasDir {
-		p.mu.Unlock()
-		sendJSONResponse(w, http.StatusNotFound, HKVCErrorResponse{ErrorType: KeyNotFoundError, ErrorInfo: "key not found", ClientID: req.ClientID})
+		p.cacheAndResponse(w, req.ClientID, http.StatusNotFound, HKVCErrorResponse{ErrorType: KeyNotFoundError, ErrorInfo: "key not found", ClientID: req.ClientID})
 		return
 	}
 	p.mu.Unlock()
@@ -281,7 +403,5 @@ func (p *HKVCParticipant) handleDelete(w http.ResponseWriter, r *http.Request) {
 	p.ensureApplied(0)
 	result := p.applyResults[0][logIndex]
 	delete(p.applyResults[0], logIndex)
-	p.mu.Unlock()
-
-	sendJSONResponse(w, result.status, KeySuccessResponse{Directory: dir, Key: req.Key, Success: result.success, ClientID: req.ClientID})
+	p.cacheAndResponse(w, req.ClientID, result.status, KeySuccessResponse{Directory: dir, Key: req.Key, Success: result.success, ClientID: req.ClientID})
 }
