@@ -112,7 +112,7 @@ func getResponse(port int, endpoint string, msg []byte, v any) (int, *HKVCErrorR
 // arguments:
 // -- msg: a populated struct containing message fields the client is submitting
 // -- port: client request sent to localhost:port
-// -- endoint: api endpoint (with "/") to direct client request
+// -- endpoint: api endpoint (with "/") to direct client request
 // -- resp: pointer to placeholder for response message
 // -- expError: expected error type or "" if no error should occur
 // -- expStatusCode: expected HTTP status code number
