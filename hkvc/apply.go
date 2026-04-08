@@ -45,6 +45,12 @@ func (p *HKVCParticipant) applyCreateCmd(groupID int, command *raftCommand) *app
 	if _, ok := node.kvPairs[command.Key]; ok {
 		return &applyResult{success: false, status: http.StatusOK}
 	}
+
+	// directory already exists: safe to use, but not newly created
+	if _, ok := node.subDirs[command.Key]; ok {
+		return &applyResult{success: false, status: http.StatusOK}
+	}
+
 	node.subDirs[command.Key] = &directory{
 		name:    command.Key,
 		subDirs: make(map[string]*directory),

@@ -50,6 +50,28 @@ func (p *HKVCParticipant) resolveDir(path string) *directory {
 	return cur
 }
 
+// resolveDirChecked resolves a directory path, distinguishing between
+// "segment not found" and "segment is a kvPair, not a directory".
+// Returns (dir, "") on success, (nil, DirNotFoundError) if missing,
+// or (nil, ConflictKeyError) if a path segment is a key.
+func (p *HKVCParticipant) resolveDirChecked(path string) (*directory, string) {
+	if path == "/" {
+		return p.root, ""
+	}
+	cur := p.root
+	for _, seg := range strings.Split(strings.TrimPrefix(path, "/"), "/") {
+		if child, ok := cur.subDirs[seg]; ok {
+			cur = child
+			continue
+		}
+		if _, isKey := cur.kvPairs[seg]; isKey {
+			return nil, ConflictKeyError
+		}
+		return nil, DirNotFoundError
+	}
+	return cur, ""
+}
+
 func (p *HKVCParticipant) checkSeq(clientID string, seqNum int) int {
 	lastSeq, exists := p.clientSeq[clientID]
 	if !exists {
@@ -221,8 +243,6 @@ func (p *HKVCParticipant) handleGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	val := e.value
-	// p.mu.Unlock()
-	// sendJSONResponse(w, http.StatusOK, KeyValueMessage{Directory: dir, Key: req.Key, Value: val, ClientID: req.ClientID})
 	p.cacheAndResponse(w, req.ClientID, http.StatusOK, KeyValueMessage{Directory: dir, Key: req.Key, Value: val, ClientID: req.ClientID})
 }
 
@@ -263,9 +283,19 @@ func (p *HKVCParticipant) handleSet(w http.ResponseWriter, r *http.Request) {
 	p.clientSeq[req.ClientID] = req.SeqNumber
 
 	p.ensureApplied(0)
-	node := p.resolveDir(dir)
+	// use resolveDirChecked to detect path-is-a-key conflicts
+	node, resolveErr := p.resolveDirChecked(dir)
+	if resolveErr == ConflictKeyError {
+		p.cacheAndResponse(w, req.ClientID, http.StatusConflict, HKVCErrorResponse{ErrorType: ConflictKeyError, ErrorInfo: "path conflicts with existing key", ClientID: req.ClientID})
+		return
+	}
 	if node == nil {
 		p.cacheAndResponse(w, req.ClientID, http.StatusNotFound, HKVCErrorResponse{ErrorType: DirNotFoundError, ErrorInfo: "dir not found", ClientID: req.ClientID})
+		return
+	}
+	// conflict: key matches an existing subdirectory
+	if _, isDir := node.subDirs[req.Key]; isDir {
+		p.cacheAndResponse(w, req.ClientID, http.StatusConflict, HKVCErrorResponse{ErrorType: ConflictDirError, ErrorInfo: "key conflicts with existing directory", ClientID: req.ClientID})
 		return
 	}
 	p.mu.Unlock()
@@ -323,9 +353,20 @@ func (p *HKVCParticipant) handleCreate(w http.ResponseWriter, r *http.Request) {
 	p.clientSeq[req.ClientID] = req.SeqNumber
 
 	p.ensureApplied(0)
-	node := p.resolveDir(dir)
+
+	node, resolveErr := p.resolveDirChecked(dir)
+	if resolveErr == ConflictKeyError {
+		p.cacheAndResponse(w, req.ClientID, http.StatusConflict, HKVCErrorResponse{ErrorType: ConflictKeyError, ErrorInfo: "path conflicts with existing key", ClientID: req.ClientID})
+		return
+	}
+
 	if node == nil {
 		p.cacheAndResponse(w, req.ClientID, http.StatusNotFound, HKVCErrorResponse{ErrorType: DirNotFoundError, ErrorInfo: "dir not found", ClientID: req.ClientID})
+		return
+	}
+	// conflict: key matches an existing kvPair
+	if _, isKey := node.kvPairs[req.Key]; isKey {
+		p.cacheAndResponse(w, req.ClientID, http.StatusConflict, HKVCErrorResponse{ErrorType: ConflictKeyError, ErrorInfo: "key conflicts with existing key-value entry", ClientID: req.ClientID})
 		return
 	}
 	p.mu.Unlock()
