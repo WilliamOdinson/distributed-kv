@@ -1,7 +1,6 @@
 package hkvc
 
 import (
-	"net"
 	"net/http"
 	"raft"
 	"remote"
@@ -120,7 +119,7 @@ type HKVCParticipant struct {
 	isTerminated  bool          // indicator of whether the participant has been terminated
 	controlCallee remote.Callee // remote calleestub for the control interface
 
-	listener   net.Listener   // http listener for the participant's client interface
+	httpServer *http.Server   // http server for the participant's client interface
 	mux        *http.ServeMux // http mux for the participant's client interface
 	ClientAddr string         // ip:port address for the participant's client interface
 
@@ -129,6 +128,8 @@ type HKVCParticipant struct {
 	raftPeers    map[int]*raft.RaftPeer       // map of groupID to RaftPeer for the participant's raft interface specific to Raft group with ID groupID
 	lastApplied  map[int]int                  // per-group: last applied log index
 	applyResults map[int]map[int]*applyResult // per-group: map of log index to applyResult for the command at that log index
+	allSetupInfo []HKVCSetupInfo              // setup info for all participants
+	selfIndex    int                          // this participant's index into allSetupInfo
 
 	clientSeq  map[string]int             // clientID -> highest seq_number processed
 	clientResp map[string]*cachedResponse // clientID -> cached response for that seq_number

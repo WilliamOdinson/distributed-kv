@@ -178,7 +178,23 @@ func (p *HKVCParticipant) handleGetMetadata(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	p.clientSeq[req.ClientID] = req.SeqNumber
+	p.mu.Unlock()
 
+	// submit no-op for linearizable read
+	logIndex := p.submitAndWait(&raftCommand{Op: "no-op"})
+	if logIndex < 0 {
+		sendJSONResponse(w, http.StatusForbidden, HKVCErrorResponse{ErrorType: NonLeaderError, ErrorInfo: "lost leadership", ClientID: req.ClientID})
+		return
+	}
+
+	// build PAddrList: client addresses of all participants in group 0
+	addrList := make([]string, len(p.allSetupInfo))
+	for i := range p.allSetupInfo {
+		addrList[i] = p.allSetupInfo[i].ClientAddr
+	}
+
+	p.mu.Lock()
+	p.ensureApplied(0)
 	node := p.resolveDir(dir)
 	if node == nil {
 		p.mu.Unlock()
@@ -186,11 +202,11 @@ func (p *HKVCParticipant) handleGetMetadata(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	if _, ok := node.subDirs[req.Key]; ok {
-		p.cacheAndResponse(w, req.ClientID, http.StatusOK, MetadataResponse{Directory: dir, Key: req.Key, IsDirectory: true, Size: -1, PAddrList: []string{}, Tags: []string{}, ClientID: req.ClientID})
+		p.cacheAndResponse(w, req.ClientID, http.StatusOK, MetadataResponse{Directory: dir, Key: req.Key, IsDirectory: true, Size: -1, PAddrList: addrList, LeaderIdx: p.selfIndex, Tags: []string{}, ClientID: req.ClientID})
 		return
 	}
 	if e, ok := node.kvPairs[req.Key]; ok {
-		p.cacheAndResponse(w, req.ClientID, http.StatusOK, MetadataResponse{Directory: dir, Key: req.Key, IsDirectory: false, Size: len(e.value), Version: e.version, PAddrList: []string{}, Tags: []string{}, ClientID: req.ClientID})
+		p.cacheAndResponse(w, req.ClientID, http.StatusOK, MetadataResponse{Directory: dir, Key: req.Key, IsDirectory: false, Size: len(e.value), Version: e.version, PAddrList: addrList, LeaderIdx: p.selfIndex, Tags: []string{}, ClientID: req.ClientID})
 		return
 	}
 
@@ -231,7 +247,17 @@ func (p *HKVCParticipant) handleGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	p.clientSeq[req.ClientID] = req.SeqNumber
+	p.mu.Unlock()
 
+	// submit no-op for linearizable read
+	logIndex := p.submitAndWait(&raftCommand{Op: "no-op"})
+	if logIndex < 0 {
+		sendJSONResponse(w, http.StatusForbidden, HKVCErrorResponse{ErrorType: NonLeaderError, ErrorInfo: "lost leadership", ClientID: req.ClientID})
+		return
+	}
+
+	p.mu.Lock()
+	p.ensureApplied(0)
 	node := p.resolveDir(dir)
 	if node == nil {
 		p.cacheAndResponse(w, req.ClientID, http.StatusNotFound, HKVCErrorResponse{ErrorType: DirNotFoundError, ErrorInfo: "dir not found", ClientID: req.ClientID})

@@ -18,6 +18,8 @@ func (p *HKVCParticipant) applyCommand(groupID int, command *raftCommand) *apply
 		return p.applyCreateCmd(groupID, command)
 	case "delete":
 		return p.applyDeleteCmd(groupID, command)
+	case "no-op":
+		return &applyResult{success: true, status: http.StatusOK}
 	}
 	return &applyResult{status: http.StatusInternalServerError}
 }

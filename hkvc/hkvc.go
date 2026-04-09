@@ -82,6 +82,8 @@ func NewHKVCParticipant(pInfo []HKVCSetupInfo, index int, groups map[int][]int) 
 		raftPeers:    make(map[int]*raft.RaftPeer),
 		lastApplied:  make(map[int]int),
 		applyResults: make(map[int]map[int]*applyResult),
+		allSetupInfo: pInfo,
+		selfIndex:    index,
 
 		clientSeq:  make(map[string]int),
 		clientResp: make(map[string]*cachedResponse),
@@ -144,8 +146,10 @@ func (p *HKVCParticipant) Activate() remote.RemoteError {
 	if err != nil {
 		return remote.RemoteError{}
 	}
-	p.listener = ln
-	go http.Serve(ln, p.mux)
+	srv := &http.Server{Handler: p.mux}
+	srv.SetKeepAlivesEnabled(false)
+	p.httpServer = srv
+	go srv.Serve(ln)
 
 	for _, rp := range p.raftPeers {
 		rp.Activate()
@@ -169,9 +173,9 @@ func (p *HKVCParticipant) Deactivate() remote.RemoteError {
 	}
 	p.isActive = false
 
-	if p.listener != nil {
-		p.listener.Close()
-		p.listener = nil
+	if p.httpServer != nil {
+		p.httpServer.Close()
+		p.httpServer = nil
 	}
 
 	for _, rp := range p.raftPeers {
@@ -194,6 +198,11 @@ func (p *HKVCParticipant) Terminate() remote.RemoteError {
 	}
 	p.isTerminated = true
 	p.isActive = false
+
+	if p.httpServer != nil {
+		p.httpServer.Close()
+		p.httpServer = nil
+	}
 
 	for _, rp := range p.raftPeers {
 		rp.TerminateHKVC()
