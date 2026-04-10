@@ -173,13 +173,13 @@ func (p *HKVCParticipant) Deactivate() remote.RemoteError {
 	}
 	p.isActive = false
 
+	for _, rp := range p.raftPeers {
+		rp.Deactivate()
+	}
+
 	if p.httpServer != nil {
 		p.httpServer.Close()
 		p.httpServer = nil
-	}
-
-	for _, rp := range p.raftPeers {
-		rp.Deactivate()
 	}
 
 	return remote.RemoteError{}
