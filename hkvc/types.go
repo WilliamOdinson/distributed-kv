@@ -125,11 +125,14 @@ type HKVCParticipant struct {
 
 	root *directory // root directory of the participant's key-value store
 
-	raftPeers    map[int]*raft.RaftPeer       // map of groupID to RaftPeer for the participant's raft interface specific to Raft group with ID groupID
-	lastApplied  map[int]int                  // per-group: last applied log index
-	applyResults map[int]map[int]*applyResult // per-group: map of log index to applyResult for the command at that log index
-	allSetupInfo []HKVCSetupInfo              // setup info for all participants
-	selfIndex    int                          // this participant's index into allSetupInfo
+	raftPeers     map[int]*raft.RaftPeer       // map of groupID to RaftPeer for the participant's raft interface specific to Raft group with ID groupID
+	lastApplied   map[int]int                  // per-group: last applied log index
+	applyResults  map[int]map[int]*applyResult // per-group: map of log index to applyResult for the command at that log index
+	allSetupInfo  []HKVCSetupInfo              // setup info for all participants
+	selfIndex     int                          // this participant's index into allSetupInfo
+	allGroups     map[int][]int                // map of groupID to list of participant indices in that group, derived from allSetupInfo
+	sortedGIDs    []int                        // sorted list of groupIDs for deterministic locking order
+	createCounter int                          // round-robin counter for distributing new directories across groups
 
 	clientSeq  map[string]int             // clientID -> highest seq_number processed
 	clientResp map[string]*cachedResponse // clientID -> cached response for that seq_number
@@ -139,6 +142,7 @@ type directory struct {
 	name    string
 	subDirs map[string]*directory
 	kvPairs map[string]*kvPair
+	groupID int
 }
 
 type kvPair struct {

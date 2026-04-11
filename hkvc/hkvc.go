@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"raft"
 	"remote"
+	"sort"
 )
 
 // Hierarchical Key-Value Cluster (HKVC)
@@ -65,6 +66,11 @@ import (
 // needed for the new HKVC participant to configure and launch itself.
 func NewHKVCParticipant(pInfo []HKVCSetupInfo, index int, groups map[int][]int) {
 
+	sortedGIDs := make([]int, 0, len(groups))
+	for gid := range groups {
+		sortedGIDs = append(sortedGIDs, gid)
+	}
+	sort.Ints(sortedGIDs)
 	p := &HKVCParticipant{
 		uid:          pInfo[index].Id,
 		isActive:     false,
@@ -74,16 +80,20 @@ func NewHKVCParticipant(pInfo []HKVCSetupInfo, index int, groups map[int][]int) 
 			name:    "/",
 			subDirs: make(map[string]*directory),
 			kvPairs: make(map[string]*kvPair),
+			groupID: 0,
 		},
 
 		mux:        http.NewServeMux(),
 		ClientAddr: pInfo[index].ClientAddr,
 
-		raftPeers:    make(map[int]*raft.RaftPeer),
-		lastApplied:  make(map[int]int),
-		applyResults: make(map[int]map[int]*applyResult),
-		allSetupInfo: pInfo,
-		selfIndex:    index,
+		raftPeers:     make(map[int]*raft.RaftPeer),
+		lastApplied:   make(map[int]int),
+		applyResults:  make(map[int]map[int]*applyResult),
+		allSetupInfo:  pInfo,
+		selfIndex:     index,
+		allGroups:     groups,
+		sortedGIDs:    sortedGIDs,
+		createCounter: 0,
 
 		clientSeq:  make(map[string]int),
 		clientResp: make(map[string]*cachedResponse),
