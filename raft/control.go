@@ -18,13 +18,14 @@ func NewRaftPeer(peerInfo []RaftSetupInfo, index int) {
 		isLeader:     false,
 		isCandidate:  false,
 
-		currentTerm: 0,
-		votedFor:    -1,
-		log:         make([]LogEntry, 1), // log index starts at 1, so we must add a dummy entry at index 0
-		commitIndex: 0,
-		lastApplied: 0,
-		nextIndex:   make([]int, len(peerInfo)-1),
-		matchIndex:  make([]int, len(peerInfo)-1),
+		currentTerm:   0,
+		votedFor:      -1,
+		currentLeader: -1,
+		log:           make([]LogEntry, 1), // log index starts at 1, so we must add a dummy entry at index 0
+		commitIndex:   0,
+		lastApplied:   0,
+		nextIndex:     make([]int, len(peerInfo)-1),
+		matchIndex:    make([]int, len(peerInfo)-1),
 
 		ch: make(chan struct{}),
 	}
@@ -113,12 +114,13 @@ func (rp *RaftPeer) GetStatus() (StatusReport, remote.RemoteError) {
 	callCount := rp.raftCalleeStub.GetCallCount()
 
 	return StatusReport{
-		Index:       len(rp.log) - 1,
-		CommitIndex: rp.commitIndex,
-		Term:        rp.currentTerm,
-		IsLeader:    rp.isLeader,
-		IsActive:    rp.isActive,
-		CallCount:   callCount,
+		Index:         len(rp.log) - 1,
+		CommitIndex:   rp.commitIndex,
+		Term:          rp.currentTerm,
+		IsLeader:      rp.isLeader,
+		IsActive:      rp.isActive,
+		CurrentLeader: rp.currentLeader,
+		CallCount:     callCount,
 	}, remote.RemoteError{}
 }
 

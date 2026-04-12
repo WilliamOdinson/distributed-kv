@@ -169,6 +169,7 @@ func (rp *RaftPeer) StartElection() {
 		// become leader
 		rp.isLeader = true
 		rp.isCandidate = false
+		rp.currentLeader = rp.id
 		rp.nextIndex = make([]int, rp.totalPeers-1)
 		for i := range rp.nextIndex {
 			rp.nextIndex[i] = len(rp.log)
@@ -256,6 +257,7 @@ func (rp *RaftPeer) AppendEntries(term int, leaderId int, prevLogIndex int, prev
 
 	rp.isLeader = false
 	rp.isCandidate = false
+	rp.currentLeader = leaderId
 	rp.resetElectionTimeout()
 
 	logIndex := len(rp.log) - 1

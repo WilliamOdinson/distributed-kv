@@ -14,13 +14,14 @@ func NewHKVCRaftPeer(id int, selfAddr string, peerAddrs []string) *RaftPeer {
 		isLeader:     false,
 		isCandidate:  false,
 
-		currentTerm: 0,
-		votedFor:    -1,
-		log:         make([]LogEntry, 1),
-		commitIndex: 0,
-		lastApplied: 0,
-		nextIndex:   make([]int, len(peerAddrs)),
-		matchIndex:  make([]int, len(peerAddrs)),
+		currentTerm:   0,
+		votedFor:      -1,
+		currentLeader: -1,
+		log:           make([]LogEntry, 1),
+		commitIndex:   0,
+		lastApplied:   0,
+		nextIndex:     make([]int, len(peerAddrs)),
+		matchIndex:    make([]int, len(peerAddrs)),
 
 		ch: make(chan struct{}),
 	}

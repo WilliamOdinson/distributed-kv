@@ -22,12 +22,13 @@ type RaftSetupInfo struct {
 
 // Raft peer must send to Controller on request. DO NOT CHANGE.
 type StatusReport struct {
-	Index       int
-	CommitIndex int
-	Term        int
-	IsLeader    bool
-	IsActive    bool
-	CallCount   int
+	Index         int
+	CommitIndex   int
+	Term          int
+	IsLeader      bool
+	IsActive      bool
+	CurrentLeader int
+	CallCount     int
 }
 
 // LogEntry represents a single entry in the Raft log, containing the term
@@ -66,6 +67,7 @@ type RaftPeer struct {
 	isCandidate       bool          // whether this peer is currently a candidate
 	currentTerm       int           // current term number
 	votedFor          int           // candidateId that the peer voted for in current term, default to -1 if none
+	currentLeader     int           // uid of the current leader, -1 if unknown
 	log               []LogEntry    // log entries, indexed starting at 1 (index 0 is dummy)
 	commitIndex       int           // index of highest log entry known to be committed
 	lastApplied       int           // index of highest log entry applied to state machine
