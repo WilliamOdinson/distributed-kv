@@ -53,10 +53,16 @@ func (p *HKVCParticipant) applyCreateCmd(groupID int, command *raftCommand) *app
 		return &applyResult{success: false, status: http.StatusOK}
 	}
 
+	newGroupID := node.groupID
+	if node.groupID == 0 && len(p.sortedGIDs) > 0 {
+		newGroupID = p.sortedGIDs[p.createCounter%len(p.sortedGIDs)]
+		p.createCounter++
+	}
 	node.subDirs[command.Key] = &directory{
 		name:    command.Key,
 		subDirs: make(map[string]*directory),
 		kvPairs: make(map[string]*kvPair),
+		groupID: newGroupID,
 	}
 	return &applyResult{success: true, status: http.StatusCreated}
 }
@@ -97,9 +103,9 @@ func (p *HKVCParticipant) ensureApplied(groupID int) {
 	}
 }
 
-func (p *HKVCParticipant) submitAndWait(cmd *raftCommand) int {
+func (p *HKVCParticipant) submitAndWait(cmd *raftCommand, groupID int) int {
 	cmdBytes, _ := json.Marshal(cmd)
-	rp := p.raftPeers[0]
+	rp := p.raftPeers[groupID]
 	logIndex, isLeader := rp.SubmitCommand(cmdBytes)
 	if !isLeader {
 		return -1
