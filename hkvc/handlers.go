@@ -436,9 +436,13 @@ func (p *HKVCParticipant) handleCreate(w http.ResponseWriter, r *http.Request) {
 		sendJSONResponse(w, http.StatusBadRequest, HKVCErrorResponse{ErrorType: InvalidError, ErrorInfo: "bad request", ClientID: req.ClientID})
 		return
 	}
-	sr, _ := p.raftPeers[0].GetStatus()
-	if !sr.IsLeader || !sr.IsActive {
+	gid, errType := p.checkLeadership(dir, 3)
+	if errType == NonLeaderError {
 		sendJSONResponse(w, http.StatusForbidden, HKVCErrorResponse{ErrorType: NonLeaderError, ErrorInfo: "not leader", ClientID: req.ClientID})
+		return
+	}
+	if errType == ConflictKeyError {
+		sendJSONResponse(w, http.StatusConflict, HKVCErrorResponse{ErrorType: ConflictKeyError, ErrorInfo: "path conflicts with existing key", ClientID: req.ClientID})
 		return
 	}
 
@@ -461,14 +465,8 @@ func (p *HKVCParticipant) handleCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	p.clientSeq[req.ClientID] = req.SeqNumber
 
-	p.ensureApplied(0)
-
-	node, resolveErr := p.resolveDirChecked(dir)
-	if resolveErr == ConflictKeyError {
-		p.cacheAndResponse(w, req.ClientID, http.StatusConflict, HKVCErrorResponse{ErrorType: ConflictKeyError, ErrorInfo: "path conflicts with existing key", ClientID: req.ClientID})
-		return
-	}
-
+	p.ensureApplied(gid)
+	node := p.resolveDir(dir)
 	if node == nil {
 		p.cacheAndResponse(w, req.ClientID, http.StatusNotFound, HKVCErrorResponse{ErrorType: DirNotFoundError, ErrorInfo: "dir not found", ClientID: req.ClientID})
 		return
@@ -480,16 +478,16 @@ func (p *HKVCParticipant) handleCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	p.mu.Unlock()
 
-	logIndex := p.submitAndWait(&raftCommand{Op: "create", Directory: dir, Key: req.Key})
+	logIndex := p.submitAndWait(&raftCommand{Op: "create", Directory: dir, Key: req.Key}, gid)
 	if logIndex < 0 {
 		sendJSONResponse(w, http.StatusForbidden, HKVCErrorResponse{ErrorType: NonLeaderError, ErrorInfo: "lost leadership", ClientID: req.ClientID})
 		return
 	}
 
 	p.mu.Lock()
-	p.ensureApplied(0)
-	result := p.applyResults[0][logIndex]
-	delete(p.applyResults[0], logIndex)
+	p.ensureApplied(gid)
+	result := p.applyResults[gid][logIndex]
+	delete(p.applyResults[gid], logIndex)
 	p.cacheAndResponse(w, req.ClientID, result.status, KeySuccessResponse{Directory: dir, Key: req.Key, Success: result.success, ClientID: req.ClientID})
 }
 
