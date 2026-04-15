@@ -5,6 +5,9 @@ import (
 	"time"
 )
 
+// NewHKVCRaftPeer creates a Raft peer for use within an HKVC participant. Unlike NewRaftPeer
+// (used by the controller in lab 2), this variant omits the ControlInterface callee since
+// HKVC uses its own control interface.
 func NewHKVCRaftPeer(id int, selfAddr string, peerAddrs []string) *RaftPeer {
 	rp := &RaftPeer{
 		id:           id,
@@ -33,6 +36,7 @@ func NewHKVCRaftPeer(id int, selfAddr string, peerAddrs []string) *RaftPeer {
 	}
 	rp.raftCalleeStub = raftStub
 
+	// RPC caller stubs for sending to each peer
 	for _, addr := range peerAddrs {
 		stub := &RaftInterface{}
 		remote.CallerStubCreator(stub, addr, false, false)
@@ -43,6 +47,7 @@ func NewHKVCRaftPeer(id int, selfAddr string, peerAddrs []string) *RaftPeer {
 	return rp
 }
 
+// TerminateHKVC permanently shuts down this Raft peer so no further RPCs are accepted.
 func (rp *RaftPeer) TerminateHKVC() {
 	rp.mu.Lock()
 	defer rp.mu.Unlock()
@@ -54,11 +59,14 @@ func (rp *RaftPeer) TerminateHKVC() {
 	rp.raftCalleeStub.Stop()
 }
 
+// SubmitCommand appends a command to the Raft log if this peer is the leader.
 func (rp *RaftPeer) SubmitCommand(command []byte) (int, bool) {
 	sr, _ := rp.NewCommand(command)
 	return sr.Index, sr.IsLeader
 }
 
+// WaitForCommit blocks until the given log index is committed or until the peer loses leadership,
+// or the peer is terminated, or the timeout expires.
 func (rp *RaftPeer) WaitForCommit(index int, timeout time.Duration) (int, bool) {
 	ddl := time.Now().Add(timeout)
 	for {
@@ -84,6 +92,7 @@ func (rp *RaftPeer) WaitForCommit(index int, timeout time.Duration) (int, bool) 
 	}
 }
 
+// GetLogEntry returns the raw command bytes at the given log index.
 func (rp *RaftPeer) GetLogEntry(index int) []byte {
 	rp.mu.Lock()
 	defer rp.mu.Unlock()
