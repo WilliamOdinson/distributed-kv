@@ -309,8 +309,9 @@ func (p *HKVCParticipant) handleGet(w http.ResponseWriter, r *http.Request) {
 		sendJSONResponse(w, http.StatusBadRequest, HKVCErrorResponse{ErrorType: InvalidError, ErrorInfo: "bad request", ClientID: req.ClientID})
 		return
 	}
-	sr, _ := p.raftPeers[0].GetStatus()
-	if !sr.IsLeader || !sr.IsActive {
+
+	gid, errType := p.checkLeadership(dir, 3)
+	if errType == NonLeaderError {
 		sendJSONResponse(w, http.StatusForbidden, HKVCErrorResponse{ErrorType: NonLeaderError, ErrorInfo: "not leader", ClientID: req.ClientID})
 		return
 	}
@@ -335,14 +336,13 @@ func (p *HKVCParticipant) handleGet(w http.ResponseWriter, r *http.Request) {
 	p.mu.Unlock()
 
 	// submit no-op for linearizable read
-	logIndex := p.submitAndWait(&raftCommand{Op: "no-op"})
-	if logIndex < 0 {
+	if p.submitAndWait(&raftCommand{Op: "no-op"}, gid) < 0 {
 		sendJSONResponse(w, http.StatusForbidden, HKVCErrorResponse{ErrorType: NonLeaderError, ErrorInfo: "lost leadership", ClientID: req.ClientID})
 		return
 	}
 
 	p.mu.Lock()
-	p.ensureApplied(0)
+	p.ensureApplied(gid)
 	node := p.resolveDir(dir)
 	if node == nil {
 		p.cacheAndResponse(w, req.ClientID, http.StatusNotFound, HKVCErrorResponse{ErrorType: DirNotFoundError, ErrorInfo: "dir not found", ClientID: req.ClientID})
