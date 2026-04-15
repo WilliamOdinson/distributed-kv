@@ -50,26 +50,37 @@ func (p *HKVCParticipant) resolveDir(path string) *directory {
 	return cur
 }
 
-// resolveDirChecked resolves a directory path, distinguishing between
+// resolveDirWithGroups resolves a directory path, distinguishing between
 // "segment not found" and "segment is a kvPair, not a directory".
 // Returns (dir, "") on success, (nil, DirNotFoundError) if missing,
 // or (nil, ConflictKeyError) if a path segment is a key.
-func (p *HKVCParticipant) resolveDirChecked(path string) (*directory, string) {
+func (p *HKVCParticipant) resolveDirWithGroups(path string) (*directory, int, string) {
+	// Before resolving the path, ensure we've applied all committed logs for the root's group
+	if _, inGroup := p.raftPeers[p.root.groupID]; inGroup {
+		p.ensureApplied(p.root.groupID)
+	}
 	if path == "/" {
-		return p.root, ""
+		return p.root, p.root.groupID, ""
 	}
 	cur := p.root
 	for _, seg := range strings.Split(strings.TrimPrefix(path, "/"), "/") {
+		// Check if current directory's group is one we belong to; if not, we can't be sure we're up-to-date, so return NonLeaderError
+		if _, inGroup := p.raftPeers[cur.groupID]; !inGroup {
+			return nil, cur.groupID, NonLeaderError
+		}
+		// Ensure we've applied all committed logs for the current directory's group
+		p.ensureApplied(cur.groupID)
+
 		if child, ok := cur.subDirs[seg]; ok {
 			cur = child
 			continue
 		}
 		if _, isKey := cur.kvPairs[seg]; isKey {
-			return nil, ConflictKeyError
+			return nil, cur.groupID, ConflictKeyError
 		}
-		return nil, DirNotFoundError
+		return nil, cur.groupID, DirNotFoundError
 	}
-	return cur, ""
+	return cur, cur.groupID, ""
 }
 
 func (p *HKVCParticipant) checkSeq(clientID string, seqNum int) int {
@@ -155,11 +166,7 @@ func (p *HKVCParticipant) handleGetMetadata(w http.ResponseWriter, r *http.Reque
 		sendJSONResponse(w, http.StatusBadRequest, HKVCErrorResponse{ErrorType: InvalidError, ErrorInfo: "bad request", ClientID: req.ClientID})
 		return
 	}
-	sr, _ := p.raftPeers[0].GetStatus()
-	if !sr.IsLeader || !sr.IsActive {
-		sendJSONResponse(w, http.StatusForbidden, HKVCErrorResponse{ErrorType: NonLeaderError, ErrorInfo: "not leader", ClientID: req.ClientID})
-		return
-	}
+
 	p.mu.Lock()
 
 	switch p.checkSeq(req.ClientID, req.SeqNumber) {
@@ -178,39 +185,82 @@ func (p *HKVCParticipant) handleGetMetadata(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	p.clientSeq[req.ClientID] = req.SeqNumber
-	p.mu.Unlock()
 
-	// submit no-op for linearizable read
-	logIndex := p.submitAndWait(&raftCommand{Op: "no-op"})
-	if logIndex < 0 {
-		sendJSONResponse(w, http.StatusForbidden, HKVCErrorResponse{ErrorType: NonLeaderError, ErrorInfo: "lost leadership", ClientID: req.ClientID})
-		return
+	// apply all local groups to get latest state
+	for gid := range p.raftPeers {
+		p.ensureApplied(gid)
 	}
 
-	// build PAddrList: client addresses of all participants in group 0
-	addrList := make([]string, len(p.allSetupInfo))
-	for i := range p.allSetupInfo {
-		addrList[i] = p.allSetupInfo[i].ClientAddr
-	}
-
-	p.mu.Lock()
-	p.ensureApplied(0)
 	node := p.resolveDir(dir)
+	if node != nil {
+		if rp, ok := p.raftPeers[node.groupID]; ok {
+			sr, _ := rp.GetStatus()
+			if sr.IsLeader && sr.IsActive {
+				p.mu.Unlock()
+				p.submitAndWait(&raftCommand{Op: "no-op"}, node.groupID)
+				p.mu.Lock()
+				for gid := range p.raftPeers {
+					p.ensureApplied(gid)
+				}
+				node = p.resolveDir(dir) // re-resolve after applying
+			}
+		}
+	}
 	if node == nil {
-		p.mu.Unlock()
-		sendJSONResponse(w, http.StatusNotFound, HKVCErrorResponse{ErrorType: DirNotFoundError, ErrorInfo: "dir not found", ClientID: req.ClientID})
+		p.cacheAndResponse(w, req.ClientID, http.StatusNotFound, HKVCErrorResponse{ErrorType: DirNotFoundError, ErrorInfo: "dir not found", ClientID: req.ClientID})
 		return
 	}
-	if _, ok := node.subDirs[req.Key]; ok {
-		p.cacheAndResponse(w, req.ClientID, http.StatusOK, MetadataResponse{Directory: dir, Key: req.Key, IsDirectory: true, Size: -1, PAddrList: addrList, LeaderIdx: p.selfIndex, Tags: []string{}, ClientID: req.ClientID})
+
+	// key "." = the directory itself
+	if req.Key == "." {
+		addrs, leaderIdx := p.buildGroupMetadata(node.groupID)
+		p.cacheAndResponse(w, req.ClientID, http.StatusOK, MetadataResponse{
+			Directory: dir, Key: req.Key, IsDirectory: true, Size: -1,
+			PAddrList: addrs, LeaderIdx: leaderIdx, Tags: []string{}, ClientID: req.ClientID,
+		})
 		return
 	}
+	// key is a subdirectory
+	if sub, ok := node.subDirs[req.Key]; ok {
+		addrs, leaderIdx := p.buildGroupMetadata(sub.groupID)
+		p.cacheAndResponse(w, req.ClientID, http.StatusOK, MetadataResponse{
+			Directory: dir, Key: req.Key, IsDirectory: true, Size: -1,
+			PAddrList: addrs, LeaderIdx: leaderIdx, Tags: []string{}, ClientID: req.ClientID,
+		})
+		return
+	}
+	// key is a kvPair
 	if e, ok := node.kvPairs[req.Key]; ok {
-		p.cacheAndResponse(w, req.ClientID, http.StatusOK, MetadataResponse{Directory: dir, Key: req.Key, IsDirectory: false, Size: len(e.value), Version: e.version, PAddrList: addrList, LeaderIdx: p.selfIndex, Tags: []string{}, ClientID: req.ClientID})
+		addrs, leaderIdx := p.buildGroupMetadata(node.groupID)
+		p.cacheAndResponse(w, req.ClientID, http.StatusOK, MetadataResponse{
+			Directory: dir, Key: req.Key, IsDirectory: false, Size: len(e.value), Version: e.version,
+			PAddrList: addrs, LeaderIdx: leaderIdx, Tags: []string{}, ClientID: req.ClientID,
+		})
 		return
 	}
 
 	p.cacheAndResponse(w, req.ClientID, http.StatusNotFound, HKVCErrorResponse{ErrorType: KeyNotFoundError, ErrorInfo: "key not found", ClientID: req.ClientID})
+
+}
+
+func (p *HKVCParticipant) buildGroupMetadata(groupID int) ([]string, int) {
+	members := p.allGroups[groupID]
+	addrList := make([]string, len(members))
+
+	for i, pidx := range members {
+		addrList[i] = p.allSetupInfo[pidx].ClientAddr
+	}
+	leaderIdx := -1
+	if rp, ok := p.raftPeers[groupID]; ok {
+		sr, _ := rp.GetStatus()
+		for i, pidx := range members {
+			if p.allSetupInfo[pidx].Id == sr.CurrentLeader {
+				leaderIdx = i
+				break
+			}
+		}
+	}
+	return addrList, leaderIdx
 }
 
 func (p *HKVCParticipant) handleGet(w http.ResponseWriter, r *http.Request) {
@@ -310,7 +360,7 @@ func (p *HKVCParticipant) handleSet(w http.ResponseWriter, r *http.Request) {
 
 	p.ensureApplied(0)
 	// use resolveDirChecked to detect path-is-a-key conflicts
-	node, resolveErr := p.resolveDirChecked(dir)
+	node, resolveErr := p.resolveDirWithGroups(dir)
 	if resolveErr == ConflictKeyError {
 		p.cacheAndResponse(w, req.ClientID, http.StatusConflict, HKVCErrorResponse{ErrorType: ConflictKeyError, ErrorInfo: "path conflicts with existing key", ClientID: req.ClientID})
 		return
