@@ -5,6 +5,16 @@ import (
 	"net/http"
 )
 
+// handleList serves the /list endpoint. Returns the names of all subdirectories and keys
+// immediately within the requested directory. Only the managing group's leader may respond.
+//
+// Request:  DirectoryRequest (directory, seq_number, client_id)
+// Success:  200 OK with ListResponse containing names of subdirs and keys
+// Errors:
+//   - 400 Bad Request    (HKVCInvalidRequestError)        malformed JSON or invalid directory path
+//   - 403 Forbidden      (HKVCNonRaftLeaderError)         not the managing group's leader
+//   - 404 Not Found      (HKVCDirectoryNotFoundError)     directory does not exist
+//   - 406 Not Acceptable (HKVCMsgOutOfSequenceError)      seq_number < previous from this client
 func (p *HKVCParticipant) handleList(w http.ResponseWriter, r *http.Request) {
 	var req DirectoryRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -64,6 +74,18 @@ func (p *HKVCParticipant) handleList(w http.ResponseWriter, r *http.Request) {
 	p.cacheAndResponse(w, req.ClientID, http.StatusOK, ListResponse{Directory: dir, List: list, ClientID: req.ClientID})
 }
 
+// handleGetMetadata serves the /get_metadata endpoint. Returns metadata for a key or subdirectory
+// within a directory, including version, size, managing group members (p_addr_list), and current
+// leader index. Key "." refers to the directory itself.
+// Note that any participant with the data can respond (no leader check).
+//
+// Request:  KeyRequest (directory, key, seq_number, client_id)
+// Success:  200 OK with MetadataResponse (is_directory, size, version, p_addr_list, leader_index, tags)
+// Errors:
+//   - 400 Bad Request    (HKVCInvalidRequestError)       malformed JSON, invalid path, or empty key
+//   - 404 Not Found      (HKVCDirectoryNotFoundError)    directory does not exist
+//   - 404 Not Found      (HKVCKeyNotFoundError)          key not found in directory
+//   - 406 Not Acceptable (HKVCMsgOutOfSequenceError)	  seq_number < previous from this client
 func (p *HKVCParticipant) handleGetMetadata(w http.ResponseWriter, r *http.Request) {
 	var req KeyRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -152,6 +174,17 @@ func (p *HKVCParticipant) handleGetMetadata(w http.ResponseWriter, r *http.Reque
 
 }
 
+// handleGet serves the /get endpoint. Returns the value associated with a key in a directory.
+// Only the managing group's leader may respond.
+//
+// Request:  KeyRequest (directory, key, seq_number, client_id)
+// Success:  200 OK with KeyValueMessage containing the stored value
+// Errors:
+//   - 400 Bad Request    (HKVCInvalidRequestError)      malformed JSON, invalid path, or empty key
+//   - 403 Forbidden      (HKVCNonRaftLeaderError)       not the managing group's leader
+//   - 404 Not Found      (HKVCDirectoryNotFoundError)   directory does not exist
+//   - 404 Not Found      (HKVCKeyNotFoundError)         key not found in directory
+//   - 406 Not Acceptable (HKVCMsgOutOfSequenceError)    seq_number < previous from this client
 func (p *HKVCParticipant) handleGet(w http.ResponseWriter, r *http.Request) {
 	var req KeyRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -211,6 +244,20 @@ func (p *HKVCParticipant) handleGet(w http.ResponseWriter, r *http.Request) {
 	p.cacheAndResponse(w, req.ClientID, http.StatusOK, KeyValueMessage{Directory: dir, Key: req.Key, Value: val, ClientID: req.ClientID})
 }
 
+// handleSet serves the /set endpoint. Stores a value for a key in a directory, creating the
+// key if it doesn't exist or overwriting if it does (incrementing the version number).
+//
+// Request:  KeyValueMessage (directory, key, value, seq_number, client_id)
+// Success:  201 Created with KeySuccessResponse if key is new; 200 OK with KeySuccessResponse
+// if key already existed (overwrite)
+//
+// Errors:
+//   - 400 Bad Request  (HKVCInvalidRequestError)            malformed JSON, invalid path, or empty key
+//   - 403 Forbidden    (HKVCNonRaftLeaderError)              not the managing group's leader
+//   - 404 Not Found    (HKVCDirectoryNotFoundError)          directory does not exist
+//   - 406 Not Acceptable (HKVCMsgOutOfSequenceError)         seq_number < previous from this client
+//   - 409 Conflict     (HKVCConflictExistingKeyError)        directory path contains a segment that is a key
+//   - 409 Conflict     (HKVCConflictExistingDirectoryError)  key name matches an existing subdir
 func (p *HKVCParticipant) handleSet(w http.ResponseWriter, r *http.Request) {
 	var req KeyValueMessage
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -279,6 +326,21 @@ func (p *HKVCParticipant) handleSet(w http.ResponseWriter, r *http.Request) {
 	p.cacheAndResponse(w, req.ClientID, result.status, KeySuccessResponse{Directory: dir, Key: req.Key, Success: result.success, ClientID: req.ClientID})
 }
 
+// handleCreate serves the /create endpoint. Creates a new subdirectory within an existing
+// parent directory. If the subdirectory already exists, returns success=false with 200 OK.
+// The new directory's managing Raft group is assigned by round-robin for
+// root-level children, or inherited from the parent for deeper directories.
+//
+// Request:  KeyRequest (directory, key, seq_number, client_id)
+// Success:  201 Created with KeySuccessResponse (success=true) if directory was created;
+// 200 OK with KeySuccessResponse (success=false) if directory already exists
+//
+// Errors:
+//   - 400 Bad Request  (HKVCInvalidRequestError)       malformed JSON, invalid path, or empty key
+//   - 403 Forbidden    (HKVCNonRaftLeaderError)         not the managing group's leader
+//   - 404 Not Found    (HKVCDirectoryNotFoundError)     parent directory does not exist
+//   - 406 Not Acceptable (HKVCMsgOutOfSequenceError)    seq_number < previous from this client
+//   - 409 Conflict     (HKVCConflictExistingKeyError)   path segment or key name is an existing key
 func (p *HKVCParticipant) handleCreate(w http.ResponseWriter, r *http.Request) {
 	var req KeyRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -345,6 +407,17 @@ func (p *HKVCParticipant) handleCreate(w http.ResponseWriter, r *http.Request) {
 	p.cacheAndResponse(w, req.ClientID, result.status, KeySuccessResponse{Directory: dir, Key: req.Key, Success: result.success, ClientID: req.ClientID})
 }
 
+// handleDelete serves the /delete endpoint. Removes a key or subdirectory (and all its contents).
+//
+// Request:  KeyRequest (directory, key, seq_number, client_id)
+// Success:  200 OK with KeySuccessResponse (success=true)
+//
+// Errors:
+//   - 400 Bad Request  (HKVCInvalidRequestError)       malformed JSON, invalid path, or empty key
+//   - 403 Forbidden    (HKVCNonRaftLeaderError)         not the managing group's leader
+//   - 404 Not Found    (HKVCDirectoryNotFoundError)     directory does not exist
+//   - 404 Not Found    (HKVCKeyNotFoundError)           key not found in directory
+//   - 406 Not Acceptable (HKVCMsgOutOfSequenceError)    seq_number < previous from this client
 func (p *HKVCParticipant) handleDelete(w http.ResponseWriter, r *http.Request) {
 	var req KeyRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
