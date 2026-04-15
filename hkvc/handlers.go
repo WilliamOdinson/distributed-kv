@@ -104,6 +104,33 @@ func (p *HKVCParticipant) cacheAndResponse(w http.ResponseWriter, clientID strin
 	sendJSONResponse(w, code, body)
 }
 
+func (p *HKVCParticipant) checkLeadership(dir string, attempts int) (int, string) {
+	var gid int
+	var errType string
+
+	for i := 0; i < attempts; i++ {
+		p.mu.Lock()
+		_, gid, errType = p.resolveDirWithGroups(dir)
+		p.mu.Unlock()
+		if errType != DirNotFoundError {
+			break // directory not found, but could be due to stale state; retry
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if errType == NonLeaderError {
+		return gid, NonLeaderError // after retries, still not found - likely not leader
+	}
+	rp, inGroup := p.raftPeers[gid]
+	if !inGroup {
+		return gid, NonLeaderError // not in group, treat as non-leader
+	}
+	sr, _ := rp.GetStatus()
+	if !sr.IsLeader || !sr.IsActive {
+		return gid, NonLeaderError // not leader, treat as non-leader
+	}
+	return gid, errType
+}
+
 func (p *HKVCParticipant) handleList(w http.ResponseWriter, r *http.Request) {
 	var req DirectoryRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -115,28 +142,8 @@ func (p *HKVCParticipant) handleList(w http.ResponseWriter, r *http.Request) {
 		sendJSONResponse(w, http.StatusBadRequest, HKVCErrorResponse{ErrorType: InvalidError, ErrorInfo: "bad directory", ClientID: req.ClientID})
 		return
 	}
-
-	var gid int
-	var errType string
-	// retry loop to handle potential leadership changes while resolving directory
-	for attempts := 0; attempts < 5; attempts++ {
-		p.mu.Lock()
-		_, gid, errType = p.resolveDirWithGroups(dir)
-		p.mu.Unlock()
-		if errType != DirNotFoundError {
-			break // directory not found, but could be due to stale state; retry
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
-
-	rp, inGroup := p.raftPeers[gid]
-	if errType == NonLeaderError || !inGroup {
-		sendJSONResponse(w, http.StatusForbidden, HKVCErrorResponse{ErrorType: NonLeaderError, ErrorInfo: "not leader", ClientID: req.ClientID})
-		return
-	}
-
-	sr, _ := rp.GetStatus()
-	if !sr.IsLeader || !sr.IsActive {
+	gid, errType := p.checkLeadership(dir, 5)
+	if errType == NonLeaderError {
 		sendJSONResponse(w, http.StatusForbidden, HKVCErrorResponse{ErrorType: NonLeaderError, ErrorInfo: "not leader", ClientID: req.ClientID})
 		return
 	}
