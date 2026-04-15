@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strings"
+	"time"
 )
 
 const (
@@ -114,8 +115,27 @@ func (p *HKVCParticipant) handleList(w http.ResponseWriter, r *http.Request) {
 		sendJSONResponse(w, http.StatusBadRequest, HKVCErrorResponse{ErrorType: InvalidError, ErrorInfo: "bad directory", ClientID: req.ClientID})
 		return
 	}
-	sr, _ := p.raftPeers[0].GetStatus()
 
+	var gid int
+	var errType string
+	// retry loop to handle potential leadership changes while resolving directory
+	for attempts := 0; attempts < 5; attempts++ {
+		p.mu.Lock()
+		_, gid, errType = p.resolveDirWithGroups(dir)
+		p.mu.Unlock()
+		if errType != DirNotFoundError {
+			break // directory not found, but could be due to stale state; retry
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	rp, inGroup := p.raftPeers[gid]
+	if errType == NonLeaderError || !inGroup {
+		sendJSONResponse(w, http.StatusForbidden, HKVCErrorResponse{ErrorType: NonLeaderError, ErrorInfo: "not leader", ClientID: req.ClientID})
+		return
+	}
+
+	sr, _ := rp.GetStatus()
 	if !sr.IsLeader || !sr.IsActive {
 		sendJSONResponse(w, http.StatusForbidden, HKVCErrorResponse{ErrorType: NonLeaderError, ErrorInfo: "not leader", ClientID: req.ClientID})
 		return
@@ -138,7 +158,15 @@ func (p *HKVCParticipant) handleList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	p.clientSeq[req.ClientID] = req.SeqNumber
+	p.mu.Unlock()
 
+	if p.submitAndWait(&raftCommand{Op: "no-op"}, gid) < 0 {
+		sendJSONResponse(w, http.StatusForbidden, HKVCErrorResponse{ErrorType: NonLeaderError, ErrorInfo: "lost leadership", ClientID: req.ClientID})
+		return
+	}
+
+	p.mu.Lock()
+	p.ensureApplied(gid)
 	node := p.resolveDir(dir)
 	if node == nil {
 		p.cacheAndResponse(w, req.ClientID, http.StatusNotFound, HKVCErrorResponse{ErrorType: DirNotFoundError, ErrorInfo: "dir not found", ClientID: req.ClientID})
