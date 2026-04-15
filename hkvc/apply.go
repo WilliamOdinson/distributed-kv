@@ -10,6 +10,8 @@ const (
 	applyTimeout = 3 * time.Second
 )
 
+// applyCommand dispatches a deserialized raft command to the appropriate handler.
+// Called by ensureApplied for each newly committed log entry.
 func (p *HKVCParticipant) applyCommand(groupID int, command *raftCommand) *applyResult {
 	switch command.Op {
 	case "set":
@@ -19,11 +21,14 @@ func (p *HKVCParticipant) applyCommand(groupID int, command *raftCommand) *apply
 	case "delete":
 		return p.applyDeleteCmd(groupID, command)
 	case "no-op":
+		// no-ops are submitted for linearizable reads; nothing to apply
 		return &applyResult{success: true, status: http.StatusOK}
 	}
 	return &applyResult{status: http.StatusInternalServerError}
 }
 
+// applySetCmd creates or updates a key-value pair in the target directory.
+// Returns 201 Created for new keys, 200 OK for updates (with version bump).
 func (p *HKVCParticipant) applySetCmd(groupID int, command *raftCommand) *applyResult {
 	node := p.resolveDir(command.Directory)
 	if node == nil {
@@ -39,6 +44,11 @@ func (p *HKVCParticipant) applySetCmd(groupID int, command *raftCommand) *applyR
 	return &applyResult{success: true, status: http.StatusCreated}
 }
 
+// applyCreateCmd creates a new subdirectory. Assigns it a Raft group:
+//   - Root-level dirs (parent.groupID == 0): round-robin across all groups
+//   - Deeper dirs: inherit parent's group (so the managing leader can resolve full paths)
+//
+// Returns 200 OK (success=false) if the name conflicts with an existing key or dir.
 func (p *HKVCParticipant) applyCreateCmd(groupID int, command *raftCommand) *applyResult {
 	node := p.resolveDir(command.Directory)
 	if node == nil {
@@ -47,12 +57,11 @@ func (p *HKVCParticipant) applyCreateCmd(groupID int, command *raftCommand) *app
 	if _, ok := node.kvPairs[command.Key]; ok {
 		return &applyResult{success: false, status: http.StatusOK}
 	}
-
-	// directory already exists: safe to use, but not newly created
 	if _, ok := node.subDirs[command.Key]; ok {
 		return &applyResult{success: false, status: http.StatusOK}
 	}
 
+	// Group assignment: root-level children get round-robin, others inherit.
 	newGroupID := node.groupID
 	if node.groupID == 0 && len(p.sortedGIDs) > 0 {
 		newGroupID = p.sortedGIDs[p.createCounter%len(p.sortedGIDs)]
@@ -67,6 +76,7 @@ func (p *HKVCParticipant) applyCreateCmd(groupID int, command *raftCommand) *app
 	return &applyResult{success: true, status: http.StatusCreated}
 }
 
+// applyDeleteCmd removes a key or subdirectory.
 func (p *HKVCParticipant) applyDeleteCmd(groupID int, command *raftCommand) *applyResult {
 	node := p.resolveDir(command.Directory)
 	if node == nil {
@@ -83,6 +93,7 @@ func (p *HKVCParticipant) applyDeleteCmd(groupID int, command *raftCommand) *app
 	return &applyResult{success: false, status: http.StatusNotFound}
 }
 
+// ensureApplied applies all committed but unapplied log entries for the given group.
 func (p *HKVCParticipant) ensureApplied(groupID int) {
 	rp := p.raftPeers[groupID]
 	report, _ := rp.GetStatus()
@@ -103,6 +114,8 @@ func (p *HKVCParticipant) ensureApplied(groupID int) {
 	}
 }
 
+// submitAndWait appends a command to the given group's Raft log and blocks until it is committed.
+// Returns the log index on success, -1 if not leader.
 func (p *HKVCParticipant) submitAndWait(cmd *raftCommand, groupID int) int {
 	cmdBytes, _ := json.Marshal(cmd)
 	rp := p.raftPeers[groupID]
