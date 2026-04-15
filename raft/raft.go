@@ -70,6 +70,11 @@ func (rp *RaftPeer) run() {
 					rp.mu.Unlock()
 				}(stub)
 			}
+			// single-node cluster: no peers, auto-commit
+			if len(rp.peerStubs) == 0 {
+				rp.commitIndex = rp.calculateCommitIndex()
+			}
+
 			rp.lastHeartbeatTime = now
 			rp.mu.Unlock()
 		} else if !rp.isLeader && now.Sub(rp.lastHeartbeatTime) >= rp.electionTimeout {
