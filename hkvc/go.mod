@@ -7,6 +7,8 @@ require (
 	remote v0.0.0
 )
 
+require github.com/anishathalye/porcupine v1.3.0
+
 replace (
 	raft => ../raft
 	remote => ../remote
