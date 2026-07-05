@@ -1,6 +1,6 @@
 module ticketbox
 
-go 1.26.0
+go 1.26.1
 
 require remote v0.0.0
 
