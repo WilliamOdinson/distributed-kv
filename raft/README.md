@@ -38,5 +38,16 @@ Clients interact exclusively through `ControlInterface` remote calls. Direct in-
 ## Tests
 
 ```bash
-go test -v -timeout 600s -race ./...
+go test -v -timeout 600s -race -cover ./...
+```
+
+The suite has two layers:
+
+- **Unit tests** (`logic_test.go`) build a peer in memory and call its pure methods directly (`RequestVote`, `AppendEntries`, `calculateCommitIndex`, `isUpToDate`, `NewCommand`, `WaitForCommit`, ...). No network, no goroutines, no timing: they pin the election-restriction and log-consistency rules and run in ~1s.
+- **Integration tests** (`election_test.go`, `commit_test.go`, `hkvcpeer_test.go`) stand up live clusters via the `Controller` harness in `testkit_test.go` and drive them through failures. Addresses come from the kernel (`:0`), reserved as a batch, to avoid port collisions.
+
+Run only the fast unit tests with:
+
+```bash
+go test -run 'TestRequestVote|TestAppendEntries|TestCalculateCommitIndex|TestNewCommand|TestIsUpToDate|TestWaitForCommit|TestGetLogEntry|TestGetCommittedCmd|TestResetElectionTimeout|TestSubmitCommand' -race ./...
 ```

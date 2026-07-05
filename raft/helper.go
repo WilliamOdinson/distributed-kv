@@ -5,9 +5,8 @@ import (
 	"time"
 )
 
-// NewHKVCRaftPeer creates a Raft peer for use within an HKVC participant. Unlike NewRaftPeer
-// (used by the controller in lab 2), this variant omits the ControlInterface callee since
-// HKVC uses its own control interface.
+// NewHKVCRaftPeer creates a Raft peer for use within an HKVC participant. Unlike NewRaftPeer,
+// this variant omits the ControlInterface callee since HKVC uses its own control interface.
 func NewHKVCRaftPeer(id int, selfAddr string, peerAddrs []string) *RaftPeer {
 	rp := &RaftPeer{
 		id:           id,
