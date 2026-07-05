@@ -102,6 +102,14 @@ func NewCalleeStub(serviceInterface any, serviceObject any, address string, isLo
 
 // Start launches the TCP server for Callee. It begins listening for incoming connections and handles them concurrently in separate goroutines. This method is non-blocking and returns immediately after starting the server.
 func (cs *CalleeStub) Start() error {
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+
+	// guard against a double Start(), which would leak the previous listener
+	if cs.isRunning.Load() {
+		return nil
+	}
+
 	// resolve the TCP address from string format
 	tcpAddr, err := net.ResolveTCPAddr("tcp", cs.address)
 	if err != nil {
@@ -114,6 +122,8 @@ func (cs *CalleeStub) Start() error {
 		return fmt.Errorf("failed to start TCP listener: %w", err)
 	}
 
+	// cs.listener is read by Stop() under the same mutex, so writing it here
+	// while holding the lock avoids a data race between Start and Stop.
 	cs.listener = listener
 	cs.isRunning.Store(true)
 
