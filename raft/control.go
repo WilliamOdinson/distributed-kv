@@ -114,7 +114,7 @@ func (rp *RaftPeer) GetStatus() (StatusReport, remote.RemoteError) {
 	callCount := rp.raftCalleeStub.GetCallCount()
 
 	return StatusReport{
-		Index:         len(rp.log) - 1,
+		Index:         rp.absLastIndex(),
 		CommitIndex:   rp.commitIndex,
 		Term:          rp.currentTerm,
 		IsLeader:      rp.isLeader,
@@ -124,14 +124,15 @@ func (rp *RaftPeer) GetStatus() (StatusReport, remote.RemoteError) {
 	}, remote.RemoteError{}
 }
 
-// GetCommittedCmd returns the command at the given log index if the entry exists and
-// has been committed. Returns nil if no committed entry exists at that index.
+// GetCommittedCmd returns the command at the given (absolute) log index if the
+// entry exists and has been committed. Returns nil if no committed entry exists
+// at that index (including indices already folded into a snapshot).
 func (rp *RaftPeer) GetCommittedCmd(index int) ([]byte, remote.RemoteError) {
 	rp.mu.Lock()
 	defer rp.mu.Unlock()
 
-	if index >= 0 && index < len(rp.log) && index <= rp.commitIndex {
-		return rp.log[index].Command, remote.RemoteError{}
+	if index > 0 && rp.hasEntry(index) && index <= rp.commitIndex {
+		return rp.entryAt(index), remote.RemoteError{}
 	}
 
 	return nil, remote.RemoteError{}
@@ -161,7 +162,7 @@ func (rp *RaftPeer) NewCommand(command []byte) (StatusReport, remote.RemoteError
 	}
 
 	return StatusReport{
-		Index:     len(rp.log) - 1,
+		Index:     rp.absLastIndex(),
 		Term:      rp.currentTerm,
 		IsLeader:  rp.isLeader,
 		IsActive:  rp.isActive,

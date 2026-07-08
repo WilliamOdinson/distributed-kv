@@ -29,22 +29,30 @@ func (rp *RaftPeer) run() {
 		leaderId := rp.id
 
 		if rp.isLeader && now.Sub(rp.lastHeartbeatTime) >= HeartbeatInterval {
-			// send heartbeats to followers
+			lastIdx := rp.absLastIndex()
+			// send heartbeats / replication to followers
 			for idx, stub := range rp.peerStubs {
-				prevLogIndex := rp.nextIndex[idx] - 1
-				prevLogTerm := 0
-				if prevLogIndex >= 0 && prevLogIndex < len(rp.log) {
-					prevLogTerm = rp.log[prevLogIndex].Term
+				ni := rp.nextIndex[idx]
+
+				// If the entries this follower needs have already been compacted
+				// into our snapshot, ship the snapshot instead of AppendEntries.
+				if ni <= rp.lastIncludedIndex {
+					go rp.installSnapshotToPeer(idx, stub, term, leaderId, rp.lastIncludedIndex, rp.lastIncludedTerm, rp.snapshot)
+					continue
 				}
-				if prevLogIndex >= len(rp.log) {
-					prevLogIndex = len(rp.log) - 1
+
+				prevLogIndex := ni - 1
+				prevLogTerm := rp.termAt(prevLogIndex)
+				// entries are those from ni through the end of the log (absolute)
+				var entries []LogEntry
+				if ni <= lastIdx {
+					phys := rp.physIndex(ni)
+					entries = make([]LogEntry, lastIdx-ni+1)
+					copy(entries, rp.log[phys:])
 				}
-				ni := min(rp.nextIndex[idx], len(rp.log))
-				entries := make([]LogEntry, len(rp.log)-ni)
-				copy(entries, rp.log[ni:])
 				commitIdx := rp.commitIndex
 
-				go func(stub *RaftInterface) {
+				go func(idx int, stub *RaftInterface, prevLogIndex, prevLogTerm int, entries []LogEntry) {
 					replyTerm, replyOK, remoteErr := stub.AppendEntries(term, leaderId, prevLogIndex, prevLogTerm, entries, commitIdx)
 					if remoteErr.Error() != "" {
 						// handle remote error: simply return and wait for the next heartbeat
@@ -64,11 +72,12 @@ func (rp *RaftPeer) run() {
 							rp.matchIndex[idx] = rp.nextIndex[idx] - 1
 							rp.commitIndex = rp.calculateCommitIndex()
 						} else {
-							rp.nextIndex[idx] = max(1, rp.nextIndex[idx]-1)
+							// back off, but never below the snapshot boundary
+							rp.nextIndex[idx] = max(rp.lastIncludedIndex+1, rp.nextIndex[idx]-1)
 						}
 					}
 					rp.mu.Unlock()
-				}(stub)
+				}(idx, stub, prevLogIndex, prevLogTerm, entries)
 			}
 			// single-node cluster: no peers, auto-commit
 			if len(rp.peerStubs) == 0 {
@@ -94,14 +103,16 @@ func (rp *RaftPeer) calculateCommitIndex() int {
 	if len(rp.log) == 0 {
 		return rp.commitIndex
 	}
+	// Indices are absolute: the leader's own last index plus each follower's
+	// matchIndex. The median is the highest index a majority has replicated.
 	matchIndexes := make([]int, len(rp.matchIndex)+1)
-	matchIndexes[0] = len(rp.log) - 1
+	matchIndexes[0] = rp.absLastIndex()
 	copy(matchIndexes[1:], rp.matchIndex)
 	slices.Sort(matchIndexes)
 	N := matchIndexes[len(matchIndexes)/2]
 
-	// only update commitIndex if the entry at N is from current term
-	if N > rp.commitIndex && N >= 0 && N < len(rp.log) && rp.log[N].Term == rp.currentTerm {
+	// only update commitIndex if the entry at N is from the current term (§5.4)
+	if N > rp.commitIndex && rp.termAt(N) == rp.currentTerm {
 		return N
 	}
 	return rp.commitIndex
@@ -127,11 +138,8 @@ func (rp *RaftPeer) StartElection() {
 	rp.resetElectionTimeout()
 	term := rp.currentTerm
 	leaderId := rp.id
-	lastLogIndex := len(rp.log) - 1
-	lastLogTerm := 0
-	if lastLogIndex >= 0 {
-		lastLogTerm = rp.log[lastLogIndex].Term
-	}
+	lastLogIndex := rp.absLastIndex()
+	lastLogTerm := rp.termAt(lastLogIndex)
 	rp.mu.Unlock()
 
 	votesReceived := 1
@@ -176,9 +184,10 @@ func (rp *RaftPeer) StartElection() {
 		rp.isCandidate = false
 		rp.currentLeader = rp.id
 		rp.nextIndex = make([]int, rp.totalPeers-1)
+		nextIdx := rp.absLastIndex() + 1
 		for i := range rp.nextIndex {
-			rp.nextIndex[i] = len(rp.log)
-			rp.matchIndex[i] = 0
+			rp.nextIndex[i] = nextIdx
+			rp.matchIndex[i] = rp.lastIncludedIndex
 		}
 		rp.lastHeartbeatTime = time.Time{}
 	}
@@ -230,14 +239,16 @@ func (rp *RaftPeer) RequestVote(term int, candidateId int, lastLogIndex int, las
 // isUpToDate checks whether a candidate's log is at least as up-to-date as this peer's
 // log, per the election restriction in Raft paper §5.4.
 func (rp *RaftPeer) isUpToDate(lastLogIndex int, lastLogTerm int) bool {
-	if len(rp.log) == 0 {
+	myLastIndex := rp.absLastIndex()
+	myLastTerm := rp.termAt(myLastIndex)
+	// An empty log (only the sentinel, index 0, term 0) accepts any candidate.
+	if myLastIndex == 0 && myLastTerm == 0 {
 		return true
 	}
-	lastEntry := rp.log[len(rp.log)-1]
-	if lastLogTerm != lastEntry.Term {
-		return lastLogTerm > lastEntry.Term
+	if lastLogTerm != myLastTerm {
+		return lastLogTerm > myLastTerm
 	}
-	return lastLogIndex >= len(rp.log)-1
+	return lastLogIndex >= myLastIndex
 }
 
 // AppendEntries handles an incoming AppendEntries RPC from the leader, implements Raft paper §5.3.
@@ -265,16 +276,27 @@ func (rp *RaftPeer) AppendEntries(term int, leaderId int, prevLogIndex int, prev
 	rp.currentLeader = leaderId
 	rp.resetElectionTimeout()
 
-	logIndex := len(rp.log) - 1
-	if prevLogIndex > logIndex || (prevLogIndex >= 0 && rp.log[prevLogIndex].Term != prevLogTerm) {
+	// Consistency check against absolute indices. prevLogIndex may point into
+	// the compacted region: if it is below our snapshot boundary the prefix is
+	// already known-consistent, so we only reject when it points past our log or
+	// to a live entry whose term disagrees.
+	if prevLogIndex > rp.absLastIndex() {
+		return rp.currentTerm, false, remote.RemoteError{}
+	}
+	if prevLogIndex >= rp.lastIncludedIndex && rp.termAt(prevLogIndex) != prevLogTerm {
 		return rp.currentTerm, false, remote.RemoteError{}
 	}
 
 	for i, entry := range entries {
 		index := prevLogIndex + 1 + i
-		if index < len(rp.log) {
-			if rp.log[index].Term != entry.Term {
-				rp.log = rp.log[:index]
+		// Skip entries already covered by our snapshot.
+		if index <= rp.lastIncludedIndex {
+			continue
+		}
+		if rp.hasEntry(index) {
+			if rp.termAt(index) != entry.Term {
+				// Conflict: truncate everything from here on, then append.
+				rp.log = rp.log[:rp.physIndex(index)]
 				rp.log = append(rp.log, LogEntry{Term: entry.Term, Command: entry.Command})
 			}
 		} else {
@@ -283,7 +305,7 @@ func (rp *RaftPeer) AppendEntries(term int, leaderId int, prevLogIndex int, prev
 	}
 
 	if leaderCommit > rp.commitIndex {
-		rp.commitIndex = min(leaderCommit, len(rp.log)-1)
+		rp.commitIndex = min(leaderCommit, rp.absLastIndex())
 	}
 
 	return rp.currentTerm, true, remote.RemoteError{}

@@ -91,12 +91,14 @@ func (rp *RaftPeer) WaitForCommit(index int, timeout time.Duration) (int, bool) 
 	}
 }
 
-// GetLogEntry returns the raw command bytes at the given log index.
+// GetLogEntry returns the raw command bytes at the given absolute log index, or
+// nil if that index is not a live entry (out of range, or already compacted
+// into a snapshot).
 func (rp *RaftPeer) GetLogEntry(index int) []byte {
 	rp.mu.Lock()
 	defer rp.mu.Unlock()
-	if index > 0 && index < len(rp.log) {
-		return rp.log[index].Command
+	if index > 0 && rp.hasEntry(index) {
+		return rp.entryAt(index)
 	}
 	return nil
 }
