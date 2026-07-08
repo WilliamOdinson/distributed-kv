@@ -110,8 +110,17 @@ func (p *HKVCParticipant) ensureApplied(groupID int) {
 			continue
 		}
 		result := p.applyCommand(groupID, &command)
-		p.applyResults[groupID][idx] = result
+		// Only mutating ops are looked up by index (a handler reads then deletes
+		// its own logIndex). No-op reads never consume a stored result, so
+		// storing one would leak; skip them to keep applyResults bounded.
+		if command.Op != "no-op" {
+			p.applyResults[groupID][idx] = result
+		}
 	}
+
+	// After catching up, compact the log if it has grown enough (single-group
+	// participants only; see snapshot.go).
+	p.maybeSnapshot(groupID)
 }
 
 // submitAndWait appends a command to the given group's Raft log and blocks until it is committed.
@@ -126,5 +135,8 @@ func (p *HKVCParticipant) submitAndWait(cmd *raftCommand, groupID int) int {
 	if _, ok := rp.WaitForCommit(logIndex, applyTimeout); !ok {
 		return -1
 	}
+	// Count only commands that actually reached a committed state (no-op reads
+	// included, since they too required a successful commit round).
+	p.metrics.recordCommit()
 	return logIndex
 }

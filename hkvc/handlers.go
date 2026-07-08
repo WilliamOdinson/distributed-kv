@@ -404,6 +404,15 @@ func (p *HKVCParticipant) handleCreate(w http.ResponseWriter, r *http.Request) {
 	p.ensureApplied(gid)
 	result := p.applyResults[gid][logIndex]
 	delete(p.applyResults[gid], logIndex)
+	// A missing result should never happen on the leader that submitted this
+	// command, but guard against it so we never dereference nil while holding
+	// p.mu (which would recover in the HTTP server yet leave the lock held,
+	// deadlocking the participant). Report a server error instead.
+	if result == nil {
+		p.mu.Unlock()
+		sendJSONResponse(w, http.StatusInternalServerError, HKVCErrorResponse{ErrorType: InvalidError, ErrorInfo: "result unavailable", ClientID: req.ClientID})
+		return
+	}
 	p.cacheAndResponse(w, req.ClientID, result.status, KeySuccessResponse{Directory: dir, Key: req.Key, Success: result.success, ClientID: req.ClientID})
 }
 
@@ -484,5 +493,14 @@ func (p *HKVCParticipant) handleDelete(w http.ResponseWriter, r *http.Request) {
 	p.ensureApplied(gid)
 	result := p.applyResults[gid][logIndex]
 	delete(p.applyResults[gid], logIndex)
+	// A missing result should never happen on the leader that submitted this
+	// command, but guard against it so we never dereference nil while holding
+	// p.mu (which would recover in the HTTP server yet leave the lock held,
+	// deadlocking the participant). Report a server error instead.
+	if result == nil {
+		p.mu.Unlock()
+		sendJSONResponse(w, http.StatusInternalServerError, HKVCErrorResponse{ErrorType: InvalidError, ErrorInfo: "result unavailable", ClientID: req.ClientID})
+		return
+	}
 	p.cacheAndResponse(w, req.ClientID, result.status, KeySuccessResponse{Directory: dir, Key: req.Key, Success: result.success, ClientID: req.ClientID})
 }

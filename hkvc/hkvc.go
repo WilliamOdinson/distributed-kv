@@ -49,14 +49,20 @@ func NewHKVCParticipant(pInfo []HKVCSetupInfo, index int, groups map[int][]int) 
 
 		clientSeq:  make(map[string]int),
 		clientResp: make(map[string]*cachedResponse),
+
+		log:     newParticipantLogger(pInfo[index].Id),
+		metrics: newMetrics(),
 	}
 
-	p.mux.HandleFunc("/list", p.handleList)
-	p.mux.HandleFunc("/get_metadata", p.handleGetMetadata)
-	p.mux.HandleFunc("/get", p.handleGet)
-	p.mux.HandleFunc("/set", p.handleSet)
-	p.mux.HandleFunc("/create", p.handleCreate)
-	p.mux.HandleFunc("/delete", p.handleDelete)
+	// Wrap each client handler so every request is timed and counted for the
+	// /metrics endpoint. /metrics itself is not instrumented (avoids recursion).
+	p.mux.HandleFunc("/list", p.instrument("/list", p.handleList))
+	p.mux.HandleFunc("/get_metadata", p.instrument("/get_metadata", p.handleGetMetadata))
+	p.mux.HandleFunc("/get", p.instrument("/get", p.handleGet))
+	p.mux.HandleFunc("/set", p.instrument("/set", p.handleSet))
+	p.mux.HandleFunc("/create", p.instrument("/create", p.handleCreate))
+	p.mux.HandleFunc("/delete", p.instrument("/delete", p.handleDelete))
+	p.mux.HandleFunc("/metrics", p.handleMetrics)
 
 	// Create a Raft peer for each group this participant belongs to.
 	for gid, pids := range groups {
@@ -80,6 +86,10 @@ func NewHKVCParticipant(pInfo []HKVCSetupInfo, index int, groups map[int][]int) 
 		p.lastApplied[gid] = 0
 		p.applyResults[gid] = make(map[int]*applyResult)
 	}
+
+	// Register snapshot restore handlers so a lagging participant can rebuild
+	// its tree from a leader-shipped snapshot (log compaction).
+	p.installSnapshotHandlers()
 
 	ctrlIfc := &HKVCControlInterface{}
 	ctrlStub, err := remote.NewCalleeStub(ctrlIfc, p, pInfo[index].ControlAddr, false, false)
@@ -114,6 +124,9 @@ func (p *HKVCParticipant) Activate() remote.RemoteError {
 
 	for _, rp := range p.raftPeers {
 		rp.Activate()
+	}
+	if p.log != nil {
+		p.log.Info("participant activated", "clientAddr", p.ClientAddr, "groups", len(p.raftPeers))
 	}
 
 	return remote.RemoteError{}

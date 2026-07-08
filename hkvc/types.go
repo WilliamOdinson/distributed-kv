@@ -1,6 +1,7 @@
 package hkvc
 
 import (
+	"log/slog"
 	"net/http"
 	"raft"
 	"remote"
@@ -136,6 +137,9 @@ type HKVCParticipant struct {
 
 	clientSeq  map[string]int             // clientID -> highest seq_number processed
 	clientResp map[string]*cachedResponse // clientID -> cached response for that seq_number
+
+	log     *slog.Logger // structured logger, tagged with this participant's uid
+	metrics *metrics     // atomic operation/latency counters served at /metrics
 }
 
 type directory struct {
