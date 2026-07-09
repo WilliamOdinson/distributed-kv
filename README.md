@@ -90,6 +90,42 @@ Each client stamps requests with a monotonically increasing sequence number. A r
 |     `/set`      | create or overwrite a key (version bumps on overwrite)  |
 |    `/create`    | create a subdirectory                                   |
 |    `/delete`    | remove a key or a subdirectory and its contents         |
+|    `/metrics`   | Prometheus-style participant + raft metrics             |
+
+### Log compaction (snapshots)
+
+The raft log does not grow without bound: once enough entries have been applied, a participant takes a **snapshot** of its state machine and hands it to raft, which discards the compacted log prefix (Raft paper §7). The log is stored with a base offset (`lastIncludedIndex`/`lastIncludedTerm`) so absolute indices survive compaction. A follower that falls behind the leader's snapshot boundary, for example one that was disconnected while the majority kept committing, is caught up with a single `InstallSnapshot` RPC instead of replaying entries the leader no longer holds. In HKVC the snapshot payload is the gob-serialized directory tree, and snapshotting is enabled for single-group participants (the common case); multi-group participants share one tree across groups, so they skip per-group compaction while the general raft machinery stays the same.
+
+### Operations: metrics and logs
+
+Every participant serves Prometheus-style metrics at `GET /metrics`: total and per-endpoint request/error counts, average handler latency, commit and snapshot counters, and live raft term / commit index / leadership per group. Participants also emit structured logs via `log/slog` (set `HKVC_LOG_LEVEL=debug` for verbose output) covering activation, snapshots, and snapshot installs.
+
+## Running it
+
+Two small binaries make the cluster usable by hand. `hkvc/cmd/hkvc-cluster` launches a local single-group cluster, and `hkvcctl` is a command-line client that finds the leader automatically.
+
+```bash
+# start a 3-node cluster (prints the client addresses)
+cd hkvc && go run ./cmd/hkvc-cluster -n 3 -base 15440
+
+# in another shell, drive it
+cd hkvcctl && go build -o hkvcctl .
+ADDRS=localhost:15440,localhost:15443,localhost:15446
+./hkvcctl -addrs $ADDRS set / hello world
+./hkvcctl -addrs $ADDRS get / hello          # -> world
+./hkvcctl -addrs $ADDRS create / config
+./hkvcctl -addrs $ADDRS ls /                 # -> config, hello
+./hkvcctl -addrs $ADDRS stat / hello         # metadata
+./hkvcctl -addrs $ADDRS metrics              # each participant's /metrics
+```
+
+Or run the scripted end-to-end demo, which builds both binaries, starts a cluster, exercises the API, and prints a slice of `/metrics`:
+
+```bash
+./demo.sh
+```
+
+`hkvcctl` uses a fresh random client id per invocation (so sequence numbers always start at 0) and retries the next address on `HKVCNonRaftLeaderError`, so it transparently follows leadership changes. `get`/`list` are leader-served and linearizable; `stat` (`/get_metadata`) is a relaxed read that any replica may answer, so its reported version can briefly lag the leader.
 
 ## Testing strategy
 
